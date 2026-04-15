@@ -2,8 +2,8 @@
 
 from .markdown_report import build_portfolio_markdown, build_session_markdown
 from .text_report import build_session_text
-from reporting.html_report import build_session_report_html, report_css
-from reporting.session_artifacts import (
+from .html_report import build_session_report_html, report_css
+from .session_artifacts import (
     ensure_project_artifact_dirs,
     import_claude_code_session_to_dir,
     import_codex_session_to_dir,

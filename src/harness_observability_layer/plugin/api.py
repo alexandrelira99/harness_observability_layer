@@ -30,8 +30,23 @@ def _load_json(path: Path) -> Dict[str, Any]:
 
 
 def _session_dirs(project_root: str | Path) -> List[Path]:
-    sessions_root = _paths(project_root)["sessions_root"]
-    return sorted((path for path in sessions_root.iterdir() if path.is_dir()), key=lambda path: path.name, reverse=True)
+    dirs = _paths(project_root)
+    session_roots = [dirs["sessions_root"]]
+    legacy_sessions_root = dirs["legacy_sessions_root"]
+    if legacy_sessions_root.exists():
+        session_roots.append(legacy_sessions_root)
+    seen_paths: set[Path] = set()
+    session_dirs: List[Path] = []
+    for session_root in session_roots:
+        for path in session_root.iterdir():
+            if not path.is_dir():
+                continue
+            resolved = path.resolve()
+            if resolved in seen_paths:
+                continue
+            seen_paths.add(resolved)
+            session_dirs.append(path)
+    return sorted(session_dirs, key=lambda path: path.name, reverse=True)
 
 
 def _session_entry(session_dir: Path, *, resolve_file_stats: bool | None = None) -> Dict[str, Any]:
@@ -42,7 +57,7 @@ def _session_entry(session_dir: Path, *, resolve_file_stats: bool | None = None)
         summary = _load_json(summary_path)
     else:
         summary = analyze_jsonl(normalized_path, resolve_file_stats=resolve_file_stats if resolve_file_stats is not None else True)
-    derived_metadata = derive_session_metadata(session_dir.name, load_events(normalized_path))
+    derived_metadata = derive_session_metadata(session_dir.name, load_events(normalized_path), include_prompt_excerpt=True)
     stored_metadata = _load_json(metadata_path) if metadata_path.exists() else {}
     metadata = {**stored_metadata, **derived_metadata}
     failures = sum(int(v) for v in summary.get("tool_failures_by_name", {}).values())
@@ -60,9 +75,11 @@ def _resolve_session(session_id_or_path: str, project_root: str | Path) -> Path:
     candidate = Path(session_id_or_path).expanduser()
     if candidate.exists():
         return candidate.resolve()
-    session_dir = _paths(project_root)["sessions_root"] / session_id_or_path
-    if session_dir.exists():
-        return session_dir
+    dirs = _paths(project_root)
+    for sessions_root in (dirs["sessions_root"], dirs["legacy_sessions_root"]):
+        session_dir = sessions_root / session_id_or_path
+        if session_dir.exists():
+            return session_dir
     raise FileNotFoundError(f"Session not found: {session_id_or_path}")
 
 

@@ -33,7 +33,7 @@ def _print(result: Any, format: str | None = None) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="hol", description="Harness Observability Layer CLI")
-    parser.add_argument("--project-root", default=".", help="Project root that contains artifacts/")
+    parser.add_argument("--project-root", default=".", help="Project root that contains hol-artifacts/")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     import_parser = subparsers.add_parser("import", help="Import archived or raw Codex sessions")

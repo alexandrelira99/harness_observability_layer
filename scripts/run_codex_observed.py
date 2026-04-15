@@ -23,7 +23,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--data-dir",
         default=None,
-        help="Directory for raw and normalized event output. Defaults to artifacts/live_runs/run_001-style folders.",
+        help="Directory for raw and normalized event output. Defaults to hol-artifacts/live_runs/run_001-style folders.",
     )
     parser.add_argument(
         "--codex-arg",

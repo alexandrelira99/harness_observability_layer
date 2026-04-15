@@ -44,6 +44,7 @@ class ReleaseSurfaceTests(unittest.TestCase):
         self.assertIn("urls", project)
         self.assertIn("dev", project["optional-dependencies"])
         self.assertIn("hol", project["scripts"])
+        self.assertEqual(data["tool"]["setuptools"]["packages"]["find"]["include"], ["harness_observability_layer*"])
 
     def test_package_import_has_no_side_effect_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -110,7 +111,7 @@ class ReleaseSurfaceTests(unittest.TestCase):
             self.assertIn('"session_id": "rollout-offline"', import_output)
             self.assertIn("- Tool calls: 0", analyze_output)
             self.assertIn('"session_id": "rollout-offline"', report_output)
-            self.assertTrue((tmp_path / "artifacts" / "sessions" / "rollout-offline" / "report.html").exists())
+            self.assertTrue((tmp_path / "hol-artifacts" / "sessions" / "rollout-offline" / "report.html").exists())
 
 
 if __name__ == "__main__":
