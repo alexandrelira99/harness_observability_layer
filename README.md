@@ -30,6 +30,26 @@ Additional review docs:
 ## Install
 
 ```bash
+pip install harness-observability-layer
+```
+
+This exposes the unified CLI:
+
+```bash
+hol --help
+```
+
+You can also invoke the package directly:
+
+```bash
+python -m harness_observability_layer --help
+```
+
+## Development Install
+
+For local development from this repository:
+
+```bash
 pip install -e .
 ```
 
@@ -37,12 +57,6 @@ For release validation and packaging tooling during development:
 
 ```bash
 pip install -e .[dev]
-```
-
-This exposes the unified CLI:
-
-```bash
-hol --help
 ```
 
 ## What exists
@@ -58,6 +72,15 @@ hol --help
 - Codex runtime wrapper for `codex exec --json`
 
 ## Quick start
+
+After `pip install harness-observability-layer`, the most common path is to point `hol` at an existing local session archive:
+
+```bash
+hol import latest
+hol analyze latest --format markdown
+```
+
+For repository-local development, the bundled example remains available:
 
 ```bash
 PYTHONPATH=src .venv/bin/python examples/mock_session.py
@@ -81,15 +104,15 @@ hol import session ~/.codex/archived_sessions/rollout-YYYY-MM-DDTHH-MM-SS-....js
 
 This now creates a session artifact folder inside the project:
 
-- `artifacts/sessions/<session-name>/raw.codex.jsonl`
-- `artifacts/sessions/<session-name>/normalized.events.jsonl`
-- `artifacts/sessions/<session-name>/summary.json`
-- `artifacts/sessions/<session-name>/report.html`
-- `artifacts/sessions/<session-name>/report.css`
+- `hol-artifacts/sessions/<session-name>/raw.codex.jsonl`
+- `hol-artifacts/sessions/<session-name>/normalized.events.jsonl`
+- `hol-artifacts/sessions/<session-name>/summary.json`
+- `hol-artifacts/sessions/<session-name>/report.html`
+- `hol-artifacts/sessions/<session-name>/report.css`
 
 It also refreshes:
 
-- `artifacts/sessions/index.html`
+- `hol-artifacts/sessions/index.html`
 
 ## Import the latest archived Codex session
 
@@ -107,10 +130,10 @@ hol import claude-session ~/.claude/projects/<project>/<session>.jsonl
 
 This imports a Claude Code JSONL session into canonical events and stores it under:
 
-- `artifacts/sessions/claude-<session-name>/raw.claude.jsonl`
-- `artifacts/sessions/claude-<session-name>/normalized.events.jsonl`
-- `artifacts/sessions/claude-<session-name>/summary.json`
-- `artifacts/sessions/claude-<session-name>/report.html`
+- `hol-artifacts/sessions/claude-<session-name>/raw.claude.jsonl`
+- `hol-artifacts/sessions/claude-<session-name>/normalized.events.jsonl`
+- `hol-artifacts/sessions/claude-<session-name>/summary.json`
+- `hol-artifacts/sessions/claude-<session-name>/report.html`
 
 To import the latest Claude session from the default archive tree:
 
@@ -148,6 +171,9 @@ hol report markdown <session-id> --redact-sensitive
 
 ## Run Codex with observability capture
 
+From the published package, use the `hol` CLI for imports, summaries, comparisons, and reports.
+The live Codex runtime wrapper below remains a repository-local helper script:
+
 ```bash
 PYTHONPATH=src .venv/bin/python scripts/run_codex_observed.py \
   "Say only OK" \
@@ -163,7 +189,7 @@ This wrapper:
 - writes a styled `report.html`
 - prints a metrics summary
 
-By default, live runs are saved under `artifacts/live_runs/run_###/`.
+By default, live runs are saved under `hol-artifacts/live_runs/run_###/`.
 
 ## Open the HTML report
 
@@ -172,7 +198,7 @@ The page is static and does not require a server.
 
 To browse imported sessions, open:
 
-- `artifacts/sessions/index.html`
+- `hol-artifacts/sessions/index.html`
 
 In restricted environments, running Codex itself may still require broader filesystem or network access than the parser/importer.
 

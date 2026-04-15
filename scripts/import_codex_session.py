@@ -15,7 +15,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-dir",
         default=None,
-        help="Session artifact directory. Defaults to artifacts/sessions/<session-name>/.",
+        help="Session artifact directory. Defaults to hol-artifacts/sessions/<session-name>/.",
     )
     return parser.parse_args()
 

@@ -23,6 +23,7 @@ htmlcov/
 
 # Local generated artifacts
 artifacts/
+hol-artifacts/
 
 # OS/editor noise
 .DS_Store

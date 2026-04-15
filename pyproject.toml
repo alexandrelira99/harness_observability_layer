@@ -49,3 +49,4 @@ license-files = ["LICENSE"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+include = ["harness_observability_layer*"]

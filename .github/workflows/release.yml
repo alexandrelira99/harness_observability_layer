@@ -43,6 +43,11 @@ jobs:
           python -m venv .release-venv
           .release-venv/bin/python -m pip install --upgrade pip
           .release-venv/bin/python -m pip install dist/*.whl
+          .release-venv/bin/python -c "import harness_observability_layer"
+          if .release-venv/bin/python -c "import observer" 2>/dev/null; then
+            echo "unexpected top-level observer package is installable"
+            exit 1
+          fi
           .release-venv/bin/hol --help
       - name: Generate artifact hashes
         run: |
