@@ -1,0 +1,14 @@
+cff-version: 1.2.0
+title: "Harness Observability Layer"
+message: "If you use this project, please cite it using the metadata below."
+type: software
+authors:
+  - family-names: "Lira"
+    given-names: "Alexandre"
+    alias: "alexandrelira99"
+repository-code: "https://github.com/alexandrelira99/harness_observability_layer"
+license: "MPL-2.0"
+version: "0.1.0"
+date-released: "2026-04-14"
+url: "https://github.com/alexandrelira99/harness_observability_layer"
+abstract: "Local-first observability tooling for agent harness sessions, imports, and reports."

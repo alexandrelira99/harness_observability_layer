@@ -23,6 +23,9 @@ Additional review docs:
 - [docs/security-audit-inventory.md](docs/security-audit-inventory.md)
 - [docs/release-hardening-checklist.md](docs/release-hardening-checklist.md)
 - [CHANGELOG.md](CHANGELOG.md)
+- [SECURITY.md](SECURITY.md)
+- [CONTRIBUTING.md](CONTRIBUTING.md)
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 
 ## Install
 
@@ -168,3 +171,7 @@ To browse imported sessions, open:
 In restricted environments, running Codex itself may still require broader filesystem or network access than the parser/importer.
 
 The legacy scripts remain available, but the package/CLI surface is now the recommended interface.
+
+## Citation
+
+If you use this project in research, documentation, or derivative tooling, please cite it using [CITATION.cff](CITATION.cff).
