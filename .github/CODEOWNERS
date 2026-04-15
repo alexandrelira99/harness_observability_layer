@@ -1,0 +1,7 @@
+* @alexandrelira99
+
+pyproject.toml @alexandrelira99
+.github/workflows/* @alexandrelira99
+src/integrations/* @alexandrelira99
+src/reporting/session_artifacts.py @alexandrelira99
+src/harness_observability_layer/plugin/api.py @alexandrelira99
