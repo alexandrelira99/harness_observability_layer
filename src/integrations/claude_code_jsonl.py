@@ -25,6 +25,13 @@ from observer.schemas import (
 
 
 _NUMBERED_READ_LINE_RE = re.compile(r"^\s*(?P<line>\d+)\t", re.MULTILINE)
+_OBSERVED_BLOCK_RE = re.compile(r"<observed_from_primary_session>\s*(?P<body>.*?)\s*</observed_from_primary_session>", re.DOTALL)
+_OBSERVED_FIELD_RE = re.compile(r"<(?P<name>[a-zA-Z0-9_]+)>\s*(?P<value>.*?)\s*</(?P=name)>", re.DOTALL)
+_SED_RANGE_RE = re.compile(r"sed\s+-n\s+'(?P<start>\d+),(?P<end>\d+)p'\s+(?P<path>\S+)")
+_RG_RE = re.compile(r"\brg\s+-n\s+(?P<query>.+?)\s+-S\s+(?P<path>\S+)")
+_CAT_RE = re.compile(r"\bcat\s+(?P<path>/\S+|\./\S+|\S+)")
+_EXIT_CODE_RE = re.compile(r"Process exited with code (?P<code>-?\d+)")
+_SESSION_ID_RE = re.compile(r"session ID (?P<session_id>\d+)")
 
 
 def _timestamp_of(raw: Dict[str, Any]) -> str:
@@ -55,6 +62,237 @@ def _count_lines(value: str | None) -> int:
     if not value:
         return 0
     return len(str(value).splitlines())
+
+
+def _parse_observed_block(body: str) -> Dict[str, str]:
+    fields: Dict[str, str] = {}
+    for match in _OBSERVED_FIELD_RE.finditer(body):
+        fields[match.group("name")] = match.group("value").strip()
+    return fields
+
+
+def _unwrap_embedded_json_string(value: str | None) -> str:
+    if not value:
+        return ""
+    text = value.strip()
+    for _ in range(3):
+        try:
+            decoded = json.loads(text)
+        except json.JSONDecodeError:
+            return text
+        if not isinstance(decoded, str):
+            return text
+        if decoded == text:
+            return decoded
+        text = decoded
+    return text
+
+
+def _parse_observed_parameters(raw_value: str | None) -> Dict[str, Any]:
+    decoded = _unwrap_embedded_json_string(raw_value)
+    if not decoded:
+        return {}
+    try:
+        parsed = json.loads(decoded)
+    except json.JSONDecodeError:
+        return {"raw": decoded}
+    return parsed if isinstance(parsed, dict) else {"raw": parsed}
+
+
+def _parse_observed_outcome(raw_value: str | None) -> str:
+    return _unwrap_embedded_json_string(raw_value)
+
+
+def _parse_line_range(cmd: str) -> tuple[int, int] | None:
+    match = _SED_RANGE_RE.search(cmd or "")
+    if not match:
+        return None
+    return int(match.group("start")), int(match.group("end"))
+
+
+def _extract_observed_output_body(outcome_text: str) -> str:
+    if not outcome_text:
+        return ""
+    marker = "Output:\n"
+    if marker in outcome_text:
+        return outcome_text.split(marker, 1)[1].strip("\n")
+    return outcome_text
+
+
+def _clean_command_path(path: str) -> str:
+    return path.strip().strip("\"'`")
+
+
+def _parse_observed_file_events(
+    *,
+    tool_name: str,
+    command_text: str,
+    output_text: str,
+    session_id: str,
+    task_id: str,
+    agent_id: str,
+    timestamp: str,
+) -> List[Event]:
+    events: List[Event] = []
+    output_body = _extract_observed_output_body(output_text)
+
+    sed_match = _SED_RANGE_RE.search(command_text or "")
+    if sed_match:
+        path = _clean_command_path(sed_match.group("path"))
+        line_start = int(sed_match.group("start"))
+        line_end = int(sed_match.group("end"))
+        line_count = _count_lines(output_body)
+        if line_count:
+            line_end = line_start + line_count - 1
+        events.append(
+            Event(
+                event_type=FILE_READ,
+                source="claude_code_jsonl",
+                session_id=session_id,
+                task_id=task_id,
+                agent_id=agent_id,
+                ts=timestamp,
+                payload=make_file_read_payload(
+                    path,
+                    line_start,
+                    line_end,
+                    tool_name,
+                    len(output_body.encode("utf-8")),
+                ),
+            )
+        )
+
+    rg_match = _RG_RE.search(command_text or "")
+    if rg_match:
+        query = rg_match.group("query").strip().strip("\"'")
+        search_path = _clean_command_path(rg_match.group("path"))
+        events.append(
+            Event(
+                event_type=FILE_SEARCH,
+                source="claude_code_jsonl",
+                session_id=session_id,
+                task_id=task_id,
+                agent_id=agent_id,
+                ts=timestamp,
+                payload={
+                    "query": query,
+                    "path": search_path,
+                    "tool_name": tool_name,
+                },
+            )
+        )
+
+    if not events:
+        cat_match = _CAT_RE.search(command_text or "")
+        if cat_match:
+            path = _clean_command_path(cat_match.group("path"))
+            line_end = max(_count_lines(output_body), 1)
+            events.append(
+                Event(
+                    event_type=FILE_READ,
+                    source="claude_code_jsonl",
+                    session_id=session_id,
+                    task_id=task_id,
+                    agent_id=agent_id,
+                    ts=timestamp,
+                    payload=make_file_read_payload(
+                        path,
+                        1,
+                        line_end,
+                        tool_name,
+                        len(output_body.encode("utf-8")),
+                    ),
+                )
+            )
+    return events
+
+
+def _observed_primary_session_events(text: str, session_id: str, task_id: str, agent_id: str) -> List[Event]:
+    events: List[Event] = []
+
+    for match in _OBSERVED_BLOCK_RE.finditer(text or ""):
+        fields = _parse_observed_block(match.group("body"))
+        tool_name = fields.get("what_happened")
+        if not tool_name:
+            continue
+
+        timestamp = fields.get("occurred_at") or ""
+        parameters = _parse_observed_parameters(fields.get("parameters"))
+        outcome_text = _parse_observed_outcome(fields.get("outcome"))
+        call_id = str(
+            parameters.get("session_id")
+            or parameters.get("call_id")
+            or (_SESSION_ID_RE.search(outcome_text).group("session_id") if _SESSION_ID_RE.search(outcome_text) else "")
+            or fields.get("occurred_at")
+            or ""
+        )
+
+        events.append(
+            Event(
+                event_type=TOOL_CALL_STARTED,
+                source="claude_code_jsonl",
+                session_id=session_id,
+                task_id=task_id,
+                agent_id=agent_id,
+                ts=timestamp,
+                payload={
+                    "tool_name": tool_name,
+                    "call_id": call_id,
+                    "arguments": parameters,
+                },
+            )
+        )
+        events.append(
+            Event(
+                event_type=TOOL_CALL_FINISHED,
+                source="claude_code_jsonl",
+                session_id=session_id,
+                task_id=task_id,
+                agent_id=agent_id,
+                ts=timestamp,
+                payload={
+                    "tool_name": tool_name,
+                    "call_id": call_id,
+                    "output_preview": outcome_text[:1000],
+                },
+            )
+        )
+
+        exit_code_match = _EXIT_CODE_RE.search(outcome_text)
+        if exit_code_match:
+            exit_code = int(exit_code_match.group("code"))
+            if exit_code != 0:
+                events.append(
+                    Event(
+                        event_type=TOOL_CALL_FAILED,
+                        source="claude_code_jsonl",
+                        session_id=session_id,
+                        task_id=task_id,
+                        agent_id=agent_id,
+                        ts=timestamp,
+                        payload={
+                            "tool_name": tool_name,
+                            "call_id": call_id,
+                            "exit_code": exit_code,
+                        },
+                    )
+                )
+
+        command_text = str(parameters.get("cmd") or "")
+        if command_text:
+            events.extend(
+                _parse_observed_file_events(
+                    tool_name=tool_name,
+                    command_text=command_text,
+                    output_text=outcome_text,
+                    session_id=session_id,
+                    task_id=task_id,
+                    agent_id=agent_id,
+                    timestamp=timestamp,
+                )
+            )
+
+    return events
 
 
 def _assistant_text_message(raw: Dict[str, Any], session_id: str, task_id: str, agent_id: str) -> List[Event]:
@@ -128,6 +366,7 @@ def normalize_claude_code_records(records: Iterable[Dict[str, Any]]) -> List[Eve
                         payload={"message": text},
                     )
                 )
+                normalized.extend(_observed_primary_session_events(text, session_id, task_id, agent_id))
 
             if isinstance(content, list):
                 for block in content:
@@ -317,4 +556,3 @@ def load_claude_code_jsonl(path: str | Path) -> List[Dict[str, Any]]:
 def normalize_claude_code_jsonl_file(path: str | Path) -> List[Event]:
     """Load and normalize a Claude Code session file."""
     return normalize_claude_code_records(load_claude_code_jsonl(path))
-

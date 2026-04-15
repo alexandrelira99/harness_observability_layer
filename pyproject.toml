@@ -8,17 +8,44 @@ version = "0.1.0"
 description = "Observability tooling for agent harness sessions, imports, and reports."
 readme = "README.md"
 requires-python = ">=3.11"
+license = {file = "LICENSE"}
 authors = [
   { name = "Alexandre Lira" },
 ]
+keywords = ["observability", "agent", "cli", "codex", "claude-code", "jsonl"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Topic :: System :: Monitoring",
+]
 dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  "build>=1.2.2",
+  "twine>=5.1.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/alexandrelira99/harness_observability_layer"
+Repository = "https://github.com/alexandrelira99/harness_observability_layer"
+Issues = "https://github.com/alexandrelira99/harness_observability_layer/issues"
+Changelog = "https://github.com/alexandrelira99/harness_observability_layer/blob/main/CHANGELOG.md"
+Security = "https://github.com/alexandrelira99/harness_observability_layer/blob/main/SECURITY.md"
 
 [project.scripts]
 hol = "harness_observability_layer.cli.main:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
+license-files = ["LICENSE"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
-

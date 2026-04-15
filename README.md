@@ -33,6 +33,12 @@ Additional review docs:
 pip install -e .
 ```
 
+For release validation and packaging tooling during development:
+
+```bash
+pip install -e .[dev]
+```
+
 This exposes the unified CLI:
 
 ```bash

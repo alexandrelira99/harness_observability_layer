@@ -19,6 +19,8 @@ Until stricter GitHub protections are enabled, contributors should still follow 
 - open a pull request for code, release workflow, packaging, and security/privacy changes
 - wait for CI to pass before merge
 - request review for changes touching release-critical files
+- for PRs targeting `main`, a review from the repository codeowner is the required approval gate for release-critical changes, including contributions from external collaborators
+- treat PyPI publication as CI-only via Trusted Publishing; do not upload release artifacts from a workstation except for incident recovery explicitly approved by the maintainer
 
 Release-critical files include:
 
@@ -50,6 +52,14 @@ If your change affects user-visible behavior, also update the relevant docs:
 - `CHANGELOG.md`
 - `docs/release-hardening-checklist.md`
 - security/privacy docs when relevant
+- `docs/pypi-release-process.md` for packaging, release, or dependency-policy changes
+
+## Packaging And Release Expectations
+
+- keep runtime dependencies minimal and intentional
+- justify any new runtime or build dependency in the PR
+- keep `pyproject.toml` metadata complete enough for a public PyPI release
+- update version metadata and `CHANGELOG.md` together for public releases
 
 ## Licensing
 
