@@ -15,12 +15,16 @@ def _fmt_number(value: Any) -> str:
     return str(value)
 
 
-def _tool_cards(tool_calls_by_name: Dict[str, Any], failures_by_name: Dict[str, Any]) -> str:
+def _tool_cards(
+    tool_calls_by_name: Dict[str, Any], failures_by_name: Dict[str, Any]
+) -> str:
     if not tool_calls_by_name:
         return '<div class="empty-state">No tool calls were detected for this session.</div>'
 
     cards = []
-    for tool_name, count in sorted(tool_calls_by_name.items(), key=lambda item: (-item[1], item[0])):
+    for tool_name, count in sorted(
+        tool_calls_by_name.items(), key=lambda item: (-item[1], item[0])
+    ):
         failures = int(failures_by_name.get(tool_name, 0))
         cards.append(
             f"""
@@ -34,7 +38,9 @@ def _tool_cards(tool_calls_by_name: Dict[str, Any], failures_by_name: Dict[str, 
     return "\n".join(cards)
 
 
-def _top_files(files: Dict[str, Dict[str, Any]], limit: int = 12) -> Iterable[Tuple[str, Dict[str, Any]]]:
+def _top_files(
+    files: Dict[str, Dict[str, Any]], limit: int = 12
+) -> Iterable[Tuple[str, Dict[str, Any]]]:
     return sorted(
         files.items(),
         key=lambda item: (
@@ -53,7 +59,9 @@ def _files_table(files: Dict[str, Dict[str, Any]]) -> str:
     for path, meta in _top_files(files):
         coverage = meta.get("read_coverage_pct")
         coverage_text = "—" if coverage is None else f"{coverage:.2f}%"
-        coverage_ratio = 0 if coverage is None else max(0, min(int(round(coverage)), 100))
+        coverage_ratio = (
+            0 if coverage is None else max(0, min(int(round(coverage)), 100))
+        )
         rows.append(
             f"""
             <tr>
@@ -79,7 +87,11 @@ def _list_block(values: Iterable[str], empty_text: str) -> str:
     values = list(values)
     if not values:
         return f'<div class="empty-state">{escape(empty_text)}</div>'
-    return "<ul class=\"inline-list\">" + "".join(f"<li>{escape(value)}</li>" for value in values) + "</ul>"
+    return (
+        '<ul class="inline-list">'
+        + "".join(f"<li>{escape(value)}</li>" for value in values)
+        + "</ul>"
+    )
 
 
 def _event_label(event: Dict[str, Any]) -> str:
@@ -110,8 +122,8 @@ def _timeline_markup(events: List[Dict[str, Any]], limit: int = 18) -> str:
               <div class="timeline-dot"></div>
               <div class="timeline-content">
                 <div class="timeline-meta">
-                  <span class="timeline-type">{escape(str(event.get('event_type', 'unknown')))}</span>
-                  <span class="timeline-ts">{escape(str(event.get('ts', '')))}</span>
+                  <span class="timeline-type">{escape(str(event.get("event_type", "unknown")))}</span>
+                  <span class="timeline-ts">{escape(str(event.get("ts", "")))}</span>
                 </div>
                 <div class="timeline-label">{escape(_event_label(event))}</div>
               </div>
@@ -123,11 +135,17 @@ def _timeline_markup(events: List[Dict[str, Any]], limit: int = 18) -> str:
 
 def _heatmap_markup(files: Dict[str, Dict[str, Any]], limit: int = 12) -> str:
     if not files:
-        return '<div class="empty-state">No files available for heatmap rendering.</div>'
+        return (
+            '<div class="empty-state">No files available for heatmap rendering.</div>'
+        )
     cards = []
     for path, meta in sorted(
         files.items(),
-        key=lambda item: (-(item[1].get("union_lines_read") or 0), -(item[1].get("edit_count") or 0), item[0]),
+        key=lambda item: (
+            -(item[1].get("union_lines_read") or 0),
+            -(item[1].get("edit_count") or 0),
+            item[0],
+        ),
     )[:limit]:
         coverage = meta.get("read_coverage_pct") or 0
         intensity = max(8, min(int(round(coverage)), 100))
@@ -142,13 +160,52 @@ def _heatmap_markup(files: Dict[str, Dict[str, Any]], limit: int = 12) -> str:
               </div>
               <div class="heat-bar"><span style="width:{intensity}%"></span></div>
               <div class="heat-meta">
-                <span>read {meta.get('union_lines_read', 0)} lines</span>
+                <span>read {meta.get("union_lines_read", 0)} lines</span>
                 <span>edits {edits}</span>
               </div>
             </article>
             """
         )
     return "\n".join(cards)
+
+
+def _format_duration(seconds: float) -> str:
+    if seconds <= 0:
+        return "0s"
+    if seconds < 60:
+        return f"{seconds:.0f}s"
+    minutes = seconds / 60
+    if minutes < 60:
+        return f"{minutes:.1f}m"
+    hours = minutes / 60
+    return f"{hours:.1f}h"
+
+
+def _format_cost(cost: float | None) -> str:
+    if cost is None:
+        return "—"
+    if cost < 0.01:
+        return f"${cost:.4f}"
+    return f"${cost:.2f}"
+
+
+def _format_cost_card(summary: Dict[str, Any]) -> str:
+    plan = summary.get("plan_type")
+    cost = summary.get("estimated_cost_usd")
+    if plan:
+        label = plan.capitalize()
+        if cost is not None:
+            return f'{label} <span style="font-size:0.6em;opacity:0.6">(API-equiv {_format_cost(cost)})</span>'
+        return label
+    return _format_cost(cost)
+
+
+def _format_tokens(count: int) -> str:
+    if count >= 1_000_000:
+        return f"{count / 1_000_000:.1f}M"
+    if count >= 1_000:
+        return f"{count / 1_000:.1f}K"
+    return str(count)
 
 
 def build_session_report_html(
@@ -163,21 +220,41 @@ def build_session_report_html(
     tool_calls_by_name = summary.get("tool_calls_by_name", {})
     failures_by_name = summary.get("tool_failures_by_name", {})
     edited_without_read = summary.get("edited_without_prior_read", [])
+    read_without_edit = summary.get("read_without_edit", [])
+    reread_files = summary.get("reread_files", [])
     skill_loads = summary.get("skill_loads_by_name", {})
     plugin_calls = summary.get("plugin_invocations_by_name", {})
+    efficiency = summary.get("efficiency_indicators", {})
+    stop_reasons = summary.get("stop_reasons", {})
+    bash_categories = summary.get("bash_command_categories", {})
+    skills_without_followup = summary.get("skills_without_followup", [])
+    tool_failure_rate = summary.get("tool_failure_rate_by_name", {})
     summary_json = escape(json.dumps(summary, indent=2))
     events = events or []
     session_metadata = session_metadata or {}
     display_title = str(session_metadata.get("display_title") or session_label)
-    display_subtitle = str(session_metadata.get("display_subtitle") or "Imported Codex session report with normalized metrics, file usage, tool activity, and workflow signals.")
+    display_subtitle = str(
+        session_metadata.get("display_subtitle")
+        or "Imported Codex session report with normalized metrics, file usage, tool activity, and workflow signals."
+    )
     technical_id = str(session_metadata.get("technical_id") or session_label)
 
     skill_markup = _list_block(
-        [f"{name} ({count})" for name, count in sorted(skill_loads.items(), key=lambda item: (-item[1], item[0]))],
+        [
+            f"{name} ({count})"
+            for name, count in sorted(
+                skill_loads.items(), key=lambda item: (-item[1], item[0])
+            )
+        ],
         "No skill activation detected in the imported stream.",
     )
     plugin_markup = _list_block(
-        [f"{name} ({count})" for name, count in sorted(plugin_calls.items(), key=lambda item: (-item[1], item[0]))],
+        [
+            f"{name} ({count})"
+            for name, count in sorted(
+                plugin_calls.items(), key=lambda item: (-item[1], item[0])
+            )
+        ],
         "No plugin invocation detected in the imported stream.",
     )
 
@@ -228,6 +305,26 @@ def build_session_report_html(
         <div class="metric-value">{sum(int(v) for v in failures_by_name.values())}</div>
         <div class="metric-subtle">tool failures detected</div>
       </article>
+      <article class="metric-card">
+        <div class="metric-label">Total Tokens</div>
+        <div class="metric-value">{_format_tokens(summary.get("total_tokens", 0))}</div>
+        <div class="metric-subtle">{_format_tokens(summary.get("total_input_tokens", 0))} in / {_format_tokens(summary.get("total_output_tokens", 0))} out</div>
+      </article>
+      <article class="metric-card">
+        <div class="metric-label">Est. Cost</div>
+        <div class="metric-value">{_format_cost_card(summary)}</div>
+        <div class="metric-subtle">cache hit {summary.get("cache_hit_rate_pct", 0):.1f}%</div>
+      </article>
+      <article class="metric-card">
+        <div class="metric-label">Duration</div>
+        <div class="metric-value">{_format_duration(summary.get("session_duration_seconds", 0))}</div>
+        <div class="metric-subtle">{summary.get("turns_per_session", 0)} turns</div>
+      </article>
+      <article class="metric-card">
+        <div class="metric-label">Model</div>
+        <div class="metric-value" style="font-size:clamp(18px,2.5vw,28px)">{escape(str(summary.get("model") or "—"))}</div>
+        <div class="metric-subtle">{summary.get("max_concurrent_tool_calls", 0)} max concurrent</div>
+      </article>
     </section>
 
     <section class="panel-grid">
@@ -252,6 +349,18 @@ def build_session_report_html(
             {_list_block(edited_without_read, "No edited-without-prior-read files detected.")}
           </article>
           <article class="callout">
+            <h3>Re-read Files</h3>
+            {_list_block(reread_files, "No files were re-read.")}
+          </article>
+          <article class="callout">
+            <h3>Read Without Edit</h3>
+            {_list_block(read_without_edit, "All read files were also edited.")}
+          </article>
+          <article class="callout">
+            <h3>Skills Without Follow-up</h3>
+            {_list_block(skills_without_followup, "All loaded skills had subsequent activity.")}
+          </article>
+          <article class="callout">
             <h3>Skills</h3>
             {skill_markup}
           </article>
@@ -263,10 +372,54 @@ def build_session_report_html(
       </section>
     </section>
 
+    <section class="panel-grid" style="margin-top:18px">
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Efficiency Indicators</h2>
+          <p>Composite signals of session health.</p>
+        </div>
+        <div class="callout-stack">
+          <article class="callout">
+            <h3>Efficiency Summary</h3>
+            <div class="efficiency-grid">
+              <div class="efficiency-item"><span class="eff-label">Edited w/o Read</span><strong>{efficiency.get("edited_without_read_ratio", 0):.1f}%</strong></div>
+              <div class="efficiency-item"><span class="eff-label">Re-read Ratio</span><strong>{efficiency.get("reread_ratio", 0):.1f}%</strong></div>
+              <div class="efficiency-item"><span class="eff-label">Failure Rate</span><strong>{efficiency.get("failure_rate_pct", 0):.1f}%</strong></div>
+              <div class="efficiency-item"><span class="eff-label">Continuation Loops</span><strong>{efficiency.get("continuation_loops", 0)}</strong></div>
+              <div class="efficiency-item"><span class="eff-label">Max-Token Stops</span><strong>{efficiency.get("max_tokens_stops", 0)}</strong></div>
+              <div class="efficiency-item"><span class="eff-label">Tools/min</span><strong>{efficiency.get("tool_calls_per_minute", 0):.1f}</strong></div>
+              <div class="efficiency-item"><span class="eff-label">Edits/min</span><strong>{efficiency.get("edits_per_minute", 0):.1f}</strong></div>
+            </div>
+          </article>
+          <article class="callout">
+            <h3>Stop Reasons</h3>
+            {_list_block([f"{k}: {v}" for k, v in sorted(stop_reasons.items(), key=lambda item: (-item[1], item[0]))], "No stop reasons recorded.")}
+          </article>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Bash Activity</h2>
+          <p>Categorized shell command distribution.</p>
+        </div>
+        <div class="callout-stack">
+          <article class="callout">
+            <h3>Command Categories</h3>
+            {_list_block([f"{cat}: {cnt}" for cat, cnt in sorted(bash_categories.items(), key=lambda item: (-item[1], item[0]))], "No bash commands detected.")}
+          </article>
+          <article class="callout">
+            <h3>Tool Failure Rates</h3>
+            {_list_block([f"{name}: {rate:.1f}%" for name, rate in sorted(tool_failure_rate.items(), key=lambda item: (-item[1], item[0])) if rate > 0], "No tool failures detected.")}
+          </article>
+        </div>
+      </section>
+    </section>
+
     <section class="panel-grid">
       <section class="panel">
         <div class="panel-head">
-          <h2>Timeline</h2>
+          <h2>Event Timeline</h2>
           <p>First normalized events observed in the session.</p>
         </div>
         <div class="timeline">
@@ -353,9 +506,17 @@ body {
 }
 
 .page-shell {
-  width: min(1200px, calc(100vw - 32px));
-  margin: 0 auto;
+  width: min(1680px, calc(100vw - 48px));
+  max-width: calc(100vw - 48px);
+  margin: 0 0 0 24px;
   padding: 32px 0 48px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 18px 16px;
+}
+
+.page-shell > * {
+  grid-column: 1 / -1;
 }
 
 .hero, .panel, .metric-card {
@@ -371,6 +532,10 @@ body {
   gap: 24px;
   padding: 28px;
   border-radius: 28px;
+}
+
+.hero-copy, .hero-panel {
+  min-width: 0;
 }
 
 .eyebrow {
@@ -427,14 +592,20 @@ h1 {
   background: rgba(29, 27, 22, 0.06);
 }
 
-.stats-grid, .panel-grid, .tool-grid {
+.stats-grid, .panel-grid {
   display: grid;
+  grid-template-columns: subgrid;
   gap: 16px;
 }
 
 .stats-grid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  margin-top: 18px;
+  margin-top: 0;
+}
+
+@media (min-width: 981px) {
+  .stats-grid {
+    grid-template-columns: subgrid;
+  }
 }
 
 .metric-card {
@@ -461,13 +632,24 @@ h1 {
 }
 
 .panel-grid {
-  grid-template-columns: 1.2fr 0.8fr;
-  margin-top: 18px;
+  align-items: start;
+}
+
+.panel-grid > .panel {
+  grid-column: span 2;
+}
+
+.tool-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
 }
 
 .panel {
   border-radius: 28px;
   padding: 24px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .panel-head {
@@ -476,6 +658,10 @@ h1 {
   align-items: end;
   gap: 16px;
   margin-bottom: 18px;
+}
+
+.panel-head > * {
+  min-width: 0;
 }
 
 .panel-head h2 {
@@ -570,8 +756,8 @@ h1 {
 .session-grid-head,
 .session-row {
   display: grid;
-  grid-template-columns: minmax(0, 1.8fr) 92px 156px 92px 92px 110px;
-  gap: 10px;
+  grid-template-columns: minmax(0, 1.8fr) 72px 140px 72px 72px 80px 72px 80px 100px;
+  gap: 8px;
   align-items: center;
 }
 
@@ -719,6 +905,7 @@ h1 {
 .callout-stack {
   display: grid;
   gap: 14px;
+  min-width: 0;
 }
 
 .timeline {
@@ -830,6 +1017,8 @@ h1 {
   border-radius: 20px;
   background: var(--surface-strong);
   border: 1px solid var(--line);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .callout h3 {
@@ -845,10 +1034,46 @@ h1 {
   padding-left: 18px;
   display: grid;
   gap: 6px;
+  min-width: 0;
+  max-width: 100%;
 }
 
-.full-width {
-  margin-top: 18px;
+.inline-list li {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.efficiency-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+.efficiency-item {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(255, 250, 241, 0.7);
+  border: 1px solid var(--line);
+}
+
+.eff-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}
+
+.efficiency-item strong {
+  margin-top: 4px;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.panel.full-width {
+  grid-column: 1 / -1;
 }
 
 .table-wrap {
@@ -922,8 +1147,24 @@ th {
 }
 
 @media (max-width: 980px) {
-  .hero, .panel-grid, .stats-grid {
+  .page-shell {
     grid-template-columns: 1fr;
+    width: calc(100vw - 20px);
+    max-width: calc(100vw - 20px);
+    margin-left: 10px;
+    padding-top: 18px;
+  }
+
+  .hero {
+    grid-template-columns: 1fr;
+  }
+
+  .stats-grid, .panel-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .panel-grid > .panel {
+    grid-column: span 1;
   }
 
   .tool-grid {
@@ -935,7 +1176,7 @@ th {
   }
 
   .session-row {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr 1fr 1fr;
   }
 
   .session-row-main {
@@ -944,11 +1185,6 @@ th {
 
   .session-stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .page-shell {
-    width: min(100vw - 20px, 1200px);
-    padding-top: 18px;
   }
 
   .hero, .panel, .metric-card {

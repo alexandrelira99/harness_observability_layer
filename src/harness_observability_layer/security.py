@@ -55,7 +55,27 @@ def redact_summary(summary: Dict[str, Any]) -> Dict[str, Any]:
     for path, meta in (summary.get("files") or {}).items():
         files[redact_path(path)] = dict(meta)
     redacted["files"] = files
-    redacted["edited_without_prior_read"] = [redact_path(path) for path in summary.get("edited_without_prior_read", [])]
+    redacted["edited_without_prior_read"] = [
+        redact_path(path) for path in summary.get("edited_without_prior_read", [])
+    ]
+    redacted["read_without_edit"] = [
+        redact_path(path) for path in summary.get("read_without_edit", [])
+    ]
+    redacted["reread_files"] = [
+        redact_path(path) for path in summary.get("reread_files", [])
+    ]
+    redacted["reread_count_by_file"] = {
+        redact_path(p): c
+        for p, c in (summary.get("reread_count_by_file") or {}).items()
+    }
+    redacted["file_read_to_edit_ratio"] = {
+        redact_path(p): v
+        for p, v in (summary.get("file_read_to_edit_ratio") or {}).items()
+    }
+    redacted["overlapping_read_spans_by_file"] = {
+        redact_path(p): v
+        for p, v in (summary.get("overlapping_read_spans_by_file") or {}).items()
+    }
     return redacted
 
 
@@ -69,7 +89,9 @@ def redact_metadata(metadata: Dict[str, Any] | None) -> Dict[str, Any]:
         "display_title": "Redacted Session",
         "display_subtitle": started_at or "Sensitive details redacted",
         "technical_id": redact_text(str(technical_id) if technical_id else None),
-        "project_name": redact_text(str(metadata.get("project_name")) if metadata.get("project_name") else None),
+        "project_name": redact_text(
+            str(metadata.get("project_name")) if metadata.get("project_name") else None
+        ),
         "first_user_message": None,
     }
 

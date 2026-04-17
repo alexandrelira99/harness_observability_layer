@@ -8,7 +8,10 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
 from harness_observability_layer.observer.events import Event
-from harness_observability_layer.observer.normalizers import make_file_edit_payload, make_file_read_payload
+from harness_observability_layer.observer.normalizers import (
+    make_file_edit_payload,
+    make_file_read_payload,
+)
 from harness_observability_layer.observer.schemas import (
     AGENT_MESSAGE,
     FILE_EDIT,
@@ -25,8 +28,13 @@ from harness_observability_layer.observer.schemas import (
 
 
 _NUMBERED_READ_LINE_RE = re.compile(r"^\s*(?P<line>\d+)\t", re.MULTILINE)
-_OBSERVED_BLOCK_RE = re.compile(r"<observed_from_primary_session>\s*(?P<body>.*?)\s*</observed_from_primary_session>", re.DOTALL)
-_OBSERVED_FIELD_RE = re.compile(r"<(?P<name>[a-zA-Z0-9_]+)>\s*(?P<value>.*?)\s*</(?P=name)>", re.DOTALL)
+_OBSERVED_BLOCK_RE = re.compile(
+    r"<observed_from_primary_session>\s*(?P<body>.*?)\s*</observed_from_primary_session>",
+    re.DOTALL,
+)
+_OBSERVED_FIELD_RE = re.compile(
+    r"<(?P<name>[a-zA-Z0-9_]+)>\s*(?P<value>.*?)\s*</(?P=name)>", re.DOTALL
+)
 _SED_RANGE_RE = re.compile(r"sed\s+-n\s+'(?P<start>\d+),(?P<end>\d+)p'\s+(?P<path>\S+)")
 _RG_RE = re.compile(r"\brg\s+-n\s+(?P<query>.+?)\s+-S\s+(?P<path>\S+)")
 _CAT_RE = re.compile(r"\bcat\s+(?P<path>/\S+|\./\S+|\S+)")
@@ -207,7 +215,9 @@ def _parse_observed_file_events(
     return events
 
 
-def _observed_primary_session_events(text: str, session_id: str, task_id: str, agent_id: str) -> List[Event]:
+def _observed_primary_session_events(
+    text: str, session_id: str, task_id: str, agent_id: str
+) -> List[Event]:
     events: List[Event] = []
 
     for match in _OBSERVED_BLOCK_RE.finditer(text or ""):
@@ -222,7 +232,11 @@ def _observed_primary_session_events(text: str, session_id: str, task_id: str, a
         call_id = str(
             parameters.get("session_id")
             or parameters.get("call_id")
-            or (_SESSION_ID_RE.search(outcome_text).group("session_id") if _SESSION_ID_RE.search(outcome_text) else "")
+            or (
+                _SESSION_ID_RE.search(outcome_text).group("session_id")
+                if _SESSION_ID_RE.search(outcome_text)
+                else ""
+            )
             or fields.get("occurred_at")
             or ""
         )
@@ -295,7 +309,9 @@ def _observed_primary_session_events(text: str, session_id: str, task_id: str, a
     return events
 
 
-def _assistant_text_message(raw: Dict[str, Any], session_id: str, task_id: str, agent_id: str) -> List[Event]:
+def _assistant_text_message(
+    raw: Dict[str, Any], session_id: str, task_id: str, agent_id: str
+) -> List[Event]:
     message = raw.get("message") or {}
     texts = _extract_text_blocks(message.get("content"))
     if not texts:
@@ -308,7 +324,13 @@ def _assistant_text_message(raw: Dict[str, Any], session_id: str, task_id: str, 
             task_id=task_id,
             agent_id=agent_id,
             ts=_timestamp_of(raw),
-            payload={"message": "\n".join(texts), "phase": "assistant"},
+            payload={
+                "message": "\n".join(texts),
+                "phase": "assistant",
+                "usage": message.get("usage"),
+                "model": message.get("model"),
+                "stop_reason": message.get("stop_reason"),
+            },
         )
     ]
 
@@ -366,11 +388,18 @@ def normalize_claude_code_records(records: Iterable[Dict[str, Any]]) -> List[Eve
                         payload={"message": text},
                     )
                 )
-                normalized.extend(_observed_primary_session_events(text, session_id, task_id, agent_id))
+                normalized.extend(
+                    _observed_primary_session_events(
+                        text, session_id, task_id, agent_id
+                    )
+                )
 
             if isinstance(content, list):
                 for block in content:
-                    if not isinstance(block, dict) or block.get("type") != "tool_result":
+                    if (
+                        not isinstance(block, dict)
+                        or block.get("type") != "tool_result"
+                    ):
                         continue
                     call_id = str(block.get("tool_use_id") or "")
                     tool_name = call_names.get(call_id, "unknown")
@@ -393,10 +422,16 @@ def normalize_claude_code_records(records: Iterable[Dict[str, Any]]) -> List[Eve
 
                     tool_result = raw.get("toolUseResult") or {}
                     if tool_name == "Read":
-                        path = call_inputs.get(call_id, {}).get("file_path") or tool_result.get("filePath")
+                        path = call_inputs.get(call_id, {}).get(
+                            "file_path"
+                        ) or tool_result.get("filePath")
                         if path:
                             numbered_lines = _count_numbered_lines(output_text)
-                            line_end = numbered_lines if numbered_lines else max(_count_lines(output_text), 1)
+                            line_end = (
+                                numbered_lines
+                                if numbered_lines
+                                else max(_count_lines(output_text), 1)
+                            )
                             normalized.append(
                                 Event(
                                     event_type=FILE_READ,
@@ -415,8 +450,12 @@ def normalize_claude_code_records(records: Iterable[Dict[str, Any]]) -> List[Eve
                                 )
                             )
                     elif tool_name in {"Grep", "Glob"}:
-                        query = call_inputs.get(call_id, {}).get("pattern") or call_inputs.get(call_id, {}).get("glob")
-                        search_path = call_inputs.get(call_id, {}).get("path") or tool_result.get("filePath")
+                        query = call_inputs.get(call_id, {}).get(
+                            "pattern"
+                        ) or call_inputs.get(call_id, {}).get("glob")
+                        search_path = call_inputs.get(call_id, {}).get(
+                            "path"
+                        ) or tool_result.get("filePath")
                         normalized.append(
                             Event(
                                 event_type=FILE_SEARCH,
@@ -433,10 +472,16 @@ def normalize_claude_code_records(records: Iterable[Dict[str, Any]]) -> List[Eve
                             )
                         )
                     elif tool_name == "Edit":
-                        edit_path = tool_result.get("filePath") or call_inputs.get(call_id, {}).get("file_path")
+                        edit_path = tool_result.get("filePath") or call_inputs.get(
+                            call_id, {}
+                        ).get("file_path")
                         if edit_path:
-                            old_string = tool_result.get("oldString") or call_inputs.get(call_id, {}).get("old_string")
-                            new_string = tool_result.get("newString") or call_inputs.get(call_id, {}).get("new_string")
+                            old_string = tool_result.get(
+                                "oldString"
+                            ) or call_inputs.get(call_id, {}).get("old_string")
+                            new_string = tool_result.get(
+                                "newString"
+                            ) or call_inputs.get(call_id, {}).get("new_string")
                             normalized.append(
                                 Event(
                                     event_type=FILE_EDIT,
@@ -445,12 +490,23 @@ def normalize_claude_code_records(records: Iterable[Dict[str, Any]]) -> List[Eve
                                     task_id=task_id,
                                     agent_id=agent_id,
                                     ts=timestamp,
-                                    payload=make_file_edit_payload(
-                                        edit_path,
-                                        "Edit",
-                                        _count_lines(str(new_string) if new_string is not None else ""),
-                                        _count_lines(str(old_string) if old_string is not None else ""),
-                                    ),
+                                    payload={
+                                        **make_file_edit_payload(
+                                            edit_path,
+                                            "Edit",
+                                            _count_lines(
+                                                str(new_string)
+                                                if new_string is not None
+                                                else ""
+                                            ),
+                                            _count_lines(
+                                                str(old_string)
+                                                if old_string is not None
+                                                else ""
+                                            ),
+                                        ),
+                                        "edit_change_type": "update",
+                                    },
                                 )
                             )
                     elif tool_name == "Bash":
@@ -474,7 +530,9 @@ def normalize_claude_code_records(records: Iterable[Dict[str, Any]]) -> List[Eve
             continue
 
         if raw_type == "assistant":
-            normalized.extend(_assistant_text_message(raw, session_id, task_id, agent_id))
+            normalized.extend(
+                _assistant_text_message(raw, session_id, task_id, agent_id)
+            )
             message = raw.get("message") or {}
             content = message.get("content")
             if isinstance(content, list):
@@ -485,7 +543,11 @@ def normalize_claude_code_records(records: Iterable[Dict[str, Any]]) -> List[Eve
                     tool_name = str(block.get("name") or "unknown")
                     tool_input = block.get("input") or {}
                     call_names[call_id] = tool_name
-                    call_inputs[call_id] = tool_input if isinstance(tool_input, dict) else {"raw_input": tool_input}
+                    call_inputs[call_id] = (
+                        tool_input
+                        if isinstance(tool_input, dict)
+                        else {"raw_input": tool_input}
+                    )
                     normalized.append(
                         Event(
                             event_type=TOOL_CALL_STARTED,

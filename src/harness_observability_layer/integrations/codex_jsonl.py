@@ -8,7 +8,10 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
 from harness_observability_layer.observer.events import Event
-from harness_observability_layer.observer.normalizers import make_file_edit_payload, make_file_read_payload
+from harness_observability_layer.observer.normalizers import (
+    make_file_edit_payload,
+    make_file_read_payload,
+)
 from harness_observability_layer.observer.schemas import (
     AGENT_MESSAGE,
     FILE_EDIT,
@@ -90,6 +93,15 @@ def _parse_apply_patch_input(patch_text: str | None) -> Dict[str, tuple[int, int
     return {path: (added, removed) for path, (added, removed) in counts.items()}
 
 
+def _codex_usage_to_canonical(total_usage: Dict[str, Any]) -> Dict[str, int]:
+    return {
+        "input_tokens": int(total_usage.get("input_tokens", 0)),
+        "output_tokens": int(total_usage.get("output_tokens", 0)),
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": int(total_usage.get("cached_input_tokens", 0)),
+    }
+
+
 def normalize_codex_records(records: Iterable[Dict[str, Any]]) -> List[Event]:
     """Convert raw Codex JSONL records into canonical events."""
     normalized: List[Event] = []
@@ -99,6 +111,9 @@ def normalize_codex_records(records: Iterable[Dict[str, Any]]) -> List[Event]:
     agent_id = "main"
     current_task_id = "task_1"
     turn_counter = 0
+    current_model: str | None = None
+    session_token_totals: Dict[str, int] | None = None
+    plan_type: str | None = None
 
     for raw in records:
         raw_type = raw.get("type")
@@ -142,6 +157,12 @@ def normalize_codex_records(records: Iterable[Dict[str, Any]]) -> List[Event]:
             item = raw.get("item") or {}
             item_type = item.get("type")
             if item_type == "agent_message":
+                msg_payload: Dict[str, Any] = {
+                    "message": item.get("text"),
+                    "phase": "final_answer",
+                }
+                if current_model:
+                    msg_payload["model"] = current_model
                 normalized.append(
                     Event(
                         event_type=AGENT_MESSAGE,
@@ -150,7 +171,7 @@ def normalize_codex_records(records: Iterable[Dict[str, Any]]) -> List[Event]:
                         task_id=current_task_id,
                         agent_id=agent_id,
                         ts=timestamp,
-                        payload={"message": item.get("text"), "phase": "final_answer"},
+                        payload=msg_payload,
                     )
                 )
             continue
@@ -191,9 +212,31 @@ def normalize_codex_records(records: Iterable[Dict[str, Any]]) -> List[Event]:
             )
             continue
 
+        if raw_type == "turn_context":
+            model = payload.get("model")
+            if model:
+                current_model = model
+            continue
+
+        if raw_type == "event_msg" and payload_type == "token_count":
+            info = payload.get("info")
+            if info and isinstance(info, dict):
+                total_usage = info.get("total_token_usage")
+                if total_usage and isinstance(total_usage, dict):
+                    session_token_totals = _codex_usage_to_canonical(total_usage)
+            rate_limits = payload.get("rate_limits")
+            if rate_limits and isinstance(rate_limits, dict):
+                pt = rate_limits.get("plan_type")
+                if pt and plan_type is None:
+                    plan_type = pt
+            continue
+
         task_id = _task_id_from_payload(payload, session_id)
 
-        if raw_type == "response_item" and payload_type in {"function_call", "custom_tool_call"}:
+        if raw_type == "response_item" and payload_type in {
+            "function_call",
+            "custom_tool_call",
+        }:
             tool_name = str(payload.get("name") or "unknown")
             call_id = str(payload.get("call_id") or "")
             arguments = payload.get("arguments")
@@ -204,7 +247,9 @@ def normalize_codex_records(records: Iterable[Dict[str, Any]]) -> List[Event]:
                     arguments = {"raw_arguments": arguments}
             if call_id:
                 call_names[call_id] = tool_name
-                call_inputs[call_id] = arguments if arguments is not None else payload.get("input")
+                call_inputs[call_id] = (
+                    arguments if arguments is not None else payload.get("input")
+                )
             normalized.append(
                 Event(
                     event_type=TOOL_CALL_STARTED,
@@ -216,13 +261,18 @@ def normalize_codex_records(records: Iterable[Dict[str, Any]]) -> List[Event]:
                     payload={
                         "tool_name": tool_name,
                         "call_id": call_id,
-                        "arguments": arguments if arguments is not None else payload.get("input"),
+                        "arguments": arguments
+                        if arguments is not None
+                        else payload.get("input"),
                     },
                 )
             )
             continue
 
-        if raw_type == "response_item" and payload_type in {"function_call_output", "custom_tool_call_output"}:
+        if raw_type == "response_item" and payload_type in {
+            "function_call_output",
+            "custom_tool_call_output",
+        }:
             call_id = str(payload.get("call_id") or "")
             tool_name = call_names.get(call_id, "unknown")
             normalized.append(
@@ -309,7 +359,9 @@ def normalize_codex_records(records: Iterable[Dict[str, Any]]) -> List[Event]:
             continue
 
         if raw_type == "event_msg" and payload_type == "patch_apply_end":
-            patch_counts = _parse_apply_patch_input(str(call_inputs.get(payload.get("call_id")) or ""))
+            patch_counts = _parse_apply_patch_input(
+                str(call_inputs.get(payload.get("call_id")) or "")
+            )
             for path, change in (payload.get("changes") or {}).items():
                 added_lines, removed_lines = patch_counts.get(path, (0, 0))
                 if change.get("type") == "add" and change.get("content"):
@@ -323,7 +375,12 @@ def normalize_codex_records(records: Iterable[Dict[str, Any]]) -> List[Event]:
                         task_id=task_id,
                         agent_id=agent_id,
                         ts=timestamp,
-                        payload=make_file_edit_payload(path, "apply_patch", added_lines, removed_lines),
+                        payload={
+                            **make_file_edit_payload(
+                                path, "apply_patch", added_lines, removed_lines
+                            ),
+                            "edit_change_type": change.get("type"),
+                        },
                     )
                 )
             continue
@@ -339,7 +396,9 @@ def normalize_codex_records(records: Iterable[Dict[str, Any]]) -> List[Event]:
                     ts=timestamp,
                     payload={
                         "model_context_window": payload.get("model_context_window"),
-                        "collaboration_mode_kind": payload.get("collaboration_mode_kind"),
+                        "collaboration_mode_kind": payload.get(
+                            "collaboration_mode_kind"
+                        ),
                     },
                 )
             )
@@ -368,12 +427,21 @@ def normalize_codex_records(records: Iterable[Dict[str, Any]]) -> List[Event]:
                     task_id=task_id,
                     agent_id=agent_id,
                     ts=timestamp,
-                    payload={"outcome": "completed", "last_agent_message": payload.get("last_agent_message")},
+                    payload={
+                        "outcome": "completed",
+                        "last_agent_message": payload.get("last_agent_message"),
+                    },
                 )
             )
             continue
 
         if raw_type == "event_msg" and payload_type == "agent_message":
+            am_payload: Dict[str, Any] = {
+                "message": payload.get("message"),
+                "phase": payload.get("phase"),
+            }
+            if current_model:
+                am_payload["model"] = current_model
             normalized.append(
                 Event(
                     event_type=AGENT_MESSAGE,
@@ -382,10 +450,23 @@ def normalize_codex_records(records: Iterable[Dict[str, Any]]) -> List[Event]:
                     task_id=task_id,
                     agent_id=agent_id,
                     ts=timestamp,
-                    payload={"message": payload.get("message"), "phase": payload.get("phase")},
+                    payload=am_payload,
                 )
             )
             continue
+
+    if session_token_totals is not None:
+        for i in range(len(normalized) - 1, -1, -1):
+            if normalized[i].event_type == TASK_FINISHED:
+                existing = normalized[i].payload.get("usage") or {}
+                normalized[i].payload["usage"] = {**existing, **session_token_totals}
+                break
+
+    if plan_type is not None:
+        for i in range(len(normalized)):
+            if normalized[i].event_type == SESSION_STARTED:
+                normalized[i].payload["plan_type"] = plan_type
+                break
 
     normalized.append(
         Event(

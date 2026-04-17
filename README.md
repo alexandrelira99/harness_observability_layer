@@ -120,7 +120,8 @@ It also refreshes:
 hol import latest
 ```
 
-This picks the most recently modified `rollout-*.jsonl` from `~/.codex/archived_sessions` and imports it into the project.
+This picks the most recently modified eligible `rollout-*.jsonl` from `~/.codex/archived_sessions` and imports it into the project.
+Sessions whose recorded `cwd` points at a different directory are skipped. Sessions without a usable `cwd` are still eligible as a fallback.
 
 ## Import a Claude Code session
 
@@ -141,13 +142,16 @@ To import the latest Claude session from the default archive tree:
 hol import claude-latest
 ```
 
+Like `hol import latest`, this filters out archived sessions whose recorded `cwd` clearly belongs to another directory. Sessions without a usable `cwd` remain eligible.
+
 ## Import all archived Codex sessions
 
 ```bash
 hol import all
 ```
 
-This imports every `rollout-*.jsonl` from `~/.codex/archived_sessions`.
+This imports every eligible `rollout-*.jsonl` from `~/.codex/archived_sessions`.
+Sessions whose recorded `cwd` points at a different directory are skipped. Sessions without a usable `cwd` are still imported.
 
 By default:
 
