@@ -353,8 +353,9 @@ body {
 }
 
 .page-shell {
-  width: min(1200px, calc(100vw - 32px));
-  margin: 0 auto;
+  width: min(1680px, calc(100vw - 48px));
+  max-width: calc(100vw - 48px);
+  margin: 0 0 0 24px;
   padding: 32px 0 48px;
 }
 
@@ -465,6 +466,8 @@ h1 {
 .panel {
   border-radius: 28px;
   padding: 24px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .panel-head {
@@ -473,6 +476,10 @@ h1 {
   align-items: end;
   gap: 16px;
   margin-bottom: 18px;
+}
+
+.panel-head > * {
+  min-width: 0;
 }
 
 .panel-head h2 {
@@ -650,6 +657,7 @@ h1 {
 .callout-stack {
   display: grid;
   gap: 14px;
+  min-width: 0;
 }
 
 .timeline {
@@ -761,6 +769,8 @@ h1 {
   border-radius: 20px;
   background: var(--surface-strong);
   border: 1px solid var(--line);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .callout h3 {
@@ -776,6 +786,14 @@ h1 {
   padding-left: 18px;
   display: grid;
   gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.inline-list li {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .full-width {
@@ -878,7 +896,9 @@ th {
   }
 
   .page-shell {
-    width: min(100vw - 20px, 1200px);
+    width: calc(100vw - 20px);
+    max-width: calc(100vw - 20px);
+    margin-left: 10px;
     padding-top: 18px;
   }
 

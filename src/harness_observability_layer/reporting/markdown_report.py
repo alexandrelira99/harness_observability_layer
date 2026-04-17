@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List
-
 from harness_observability_layer.security import redact_path
 
 
@@ -14,7 +13,9 @@ def _top_items(values: Dict[str, Any], limit: int = 5) -> List[tuple[str, int]]:
     )[:limit]
 
 
-def _top_files(files: Dict[str, Dict[str, Any]], limit: int = 5) -> List[tuple[str, Dict[str, Any]]]:
+def _top_files(
+    files: Dict[str, Dict[str, Any]], limit: int = 5
+) -> List[tuple[str, Dict[str, Any]]]:
     return sorted(
         files.items(),
         key=lambda item: (
@@ -23,6 +24,46 @@ def _top_files(files: Dict[str, Dict[str, Any]], limit: int = 5) -> List[tuple[s
             item[0],
         ),
     )[:limit]
+
+
+def _format_duration(seconds: float) -> str:
+    if seconds <= 0:
+        return "—"
+    if seconds < 60:
+        return f"{seconds:.0f}s"
+    minutes = seconds / 60
+    if minutes < 60:
+        return f"{minutes:.1f}m"
+    hours = minutes / 60
+    return f"{hours:.1f}h"
+
+
+def _format_cost(cost: Any) -> str:
+    if cost is None:
+        return "—"
+    c = float(cost)
+    if c < 0.01:
+        return f"${c:.4f}"
+    return f"${c:.2f}"
+
+
+def _format_cost_line(summary: Dict[str, Any]) -> str:
+    plan = summary.get("plan_type")
+    cost = summary.get("estimated_cost_usd")
+    if plan:
+        label = plan.capitalize()
+        if cost is not None:
+            return f"{label} (API-equiv {_format_cost(cost)})"
+        return label
+    return _format_cost(cost)
+
+
+def _format_tokens(count: int) -> str:
+    if count >= 1_000_000:
+        return f"{count / 1_000_000:.1f}M"
+    if count >= 1_000:
+        return f"{count / 1_000:.1f}K"
+    return str(count)
 
 
 def build_session_markdown(
@@ -43,10 +84,16 @@ def build_session_markdown(
         "",
         "## Summary",
         f"- Session: `{session_id}`",
+        f"- Model: {summary.get('model') or '—'}",
+        f"- Duration: {_format_duration(summary.get('session_duration_seconds', 0))}",
         f"- Tool calls: {summary.get('total_tool_calls', 0)}",
         f"- Files read: {summary.get('distinct_files_read', 0)}",
         f"- Files edited: {summary.get('distinct_files_edited', 0)}",
         f"- Failures: {failures}",
+        f"- Turns: {summary.get('turns_per_session', 0)}",
+        f"- Total tokens: {_format_tokens(summary.get('total_tokens', 0))} ({_format_tokens(summary.get('total_input_tokens', 0))} in / {_format_tokens(summary.get('total_output_tokens', 0))} out)",
+        f"- Est. cost: {_format_cost_line(summary)}",
+        f"- Cache hit rate: {summary.get('cache_hit_rate_pct', 0):.1f}%",
     ]
 
     tools = _top_items(summary.get("tool_calls_by_name", {}))
@@ -70,9 +117,45 @@ def build_session_markdown(
             )
 
     edited_without_read = summary.get("edited_without_prior_read", [])
-    if edited_without_read:
+    reread_files = summary.get("reread_files", [])
+    read_without_edit = summary.get("read_without_edit", [])
+    if edited_without_read or reread_files or read_without_edit:
         lines.extend(["", "## Warnings"])
-        lines.extend(f"- Edited without prior read: `{path}`" for path in edited_without_read[:8])
+        for path in edited_without_read[:8]:
+            lines.append(f"- Edited without prior read: `{path}`")
+        for path in reread_files[:8]:
+            lines.append(f"- Re-read file: `{path}`")
+        for path in read_without_edit[:8]:
+            lines.append(f"- Read without edit: `{path}`")
+
+    efficiency = summary.get("efficiency_indicators", {})
+    if efficiency:
+        lines.extend(["", "## Efficiency Indicators"])
+        lines.append(
+            f"- Edited w/o read ratio: {efficiency.get('edited_without_read_ratio', 0):.1f}%"
+        )
+        lines.append(f"- Re-read ratio: {efficiency.get('reread_ratio', 0):.1f}%")
+        lines.append(f"- Failure rate: {efficiency.get('failure_rate_pct', 0):.1f}%")
+        lines.append(f"- Continuation loops: {efficiency.get('continuation_loops', 0)}")
+        lines.append(f"- Max-token stops: {efficiency.get('max_tokens_stops', 0)}")
+        lines.append(f"- Tools/min: {efficiency.get('tool_calls_per_minute', 0):.1f}")
+        lines.append(f"- Edits/min: {efficiency.get('edits_per_minute', 0):.1f}")
+
+    stop_reasons = summary.get("stop_reasons", {})
+    if stop_reasons:
+        lines.extend(["", "## Stop Reasons"])
+        for reason, count in sorted(
+            stop_reasons.items(), key=lambda item: (-item[1], item[0])
+        ):
+            lines.append(f"- {reason}: {count}")
+
+    bash_categories = summary.get("bash_command_categories", {})
+    if bash_categories:
+        lines.extend(["", "## Bash Command Categories"])
+        for cat, cnt in sorted(
+            bash_categories.items(), key=lambda item: (-item[1], item[0])
+        ):
+            lines.append(f"- {cat}: {cnt}")
 
     if verbosity == "high":
         skills = _top_items(summary.get("skill_loads_by_name", {}), limit=10)
@@ -99,17 +182,30 @@ def build_portfolio_markdown(entries: Iterable[Dict[str, Any]]) -> str:
         lines.extend(["", "No imported sessions found."])
         return "\n".join(lines)
 
-    lines.extend(["", "| Session | Tools | Read | Edited | Failures |", "| --- | ---: | ---: | ---: | ---: |"])
+    lines.extend(
+        [
+            "",
+            "| Session | Tools | Read | Edited | Tokens | Cost | Duration | Failures |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
     for entry in entries:
         summary = entry["summary"]
         metadata = entry.get("metadata") or {}
-        failures = sum(int(v) for v in summary.get("tool_failures_by_name", {}).values())
+        failures = sum(
+            int(v) for v in summary.get("tool_failures_by_name", {}).values()
+        )
         lines.append(
-            "| {title} | {tools} | {read} | {edited} | {failures} |".format(
-                title=str(metadata.get("display_title") or entry["session_name"]).replace("|", "\\|"),
+            "| {title} | {tools} | {read} | {edited} | {tokens} | {cost} | {duration} | {failures} |".format(
+                title=str(
+                    metadata.get("display_title") or entry["session_name"]
+                ).replace("|", "\\|"),
                 tools=summary.get("total_tool_calls", 0),
                 read=summary.get("distinct_files_read", 0),
                 edited=summary.get("distinct_files_edited", 0),
+                tokens=_format_tokens(summary.get("total_tokens", 0)),
+                cost=_format_cost_line(summary),
+                duration=_format_duration(summary.get("session_duration_seconds", 0)),
                 failures=failures,
             )
         )

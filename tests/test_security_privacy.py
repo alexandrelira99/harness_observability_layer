@@ -15,7 +15,7 @@ if str(SRC) not in sys.path:
 from harness_observability_layer.plugin.api import generate_session_html, import_session, summarize_session
 from harness_observability_layer.security import redact_path, sanitize_session_id
 from observer.analyzer import analyze_jsonl
-from reporting.html_report import build_session_report_html
+from reporting.html_report import build_session_report_html, report_css
 
 
 class SecurityPrivacyTests(unittest.TestCase):
@@ -162,6 +162,14 @@ class SecurityPrivacyTests(unittest.TestCase):
         )
         self.assertNotIn("<script>", html)
         self.assertIn("&lt;b&gt;unsafe&lt;/b&gt;", html)
+
+    def test_html_report_css_keeps_layout_left_aligned_and_prevents_callout_overflow(self) -> None:
+        css = report_css()
+        self.assertIn("width: min(1680px, calc(100vw - 48px));", css)
+        self.assertIn("margin: 0 0 0 24px;", css)
+        self.assertIn("max-width: calc(100vw - 48px);", css)
+        self.assertIn("min-width: 0;", css)
+        self.assertIn("overflow-wrap: anywhere;", css)
 
     def test_redacted_html_hides_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

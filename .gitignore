@@ -20,6 +20,7 @@ dist/
 .coverage
 .coverage.*
 htmlcov/
+.docs
 
 # Local generated artifacts
 artifacts/

@@ -102,6 +102,46 @@ def _archive_candidates(archive_root: Path, source: str) -> List[Path]:
     raise ValueError(f"Unsupported source: {source}")
 
 
+def _extract_archived_session_cwd(session_path: Path, source: str) -> Path | None:
+    try:
+        with session_path.open("r", encoding="utf-8") as handle:
+            for raw_line in handle:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                if source == "codex":
+                    if record.get("type") != "session_meta":
+                        continue
+                    payload = record.get("payload") or {}
+                    cwd = payload.get("cwd")
+                elif source == "claude":
+                    cwd = record.get("cwd")
+                else:
+                    raise ValueError(f"Unsupported source: {source}")
+
+                if not cwd:
+                    continue
+                try:
+                    return Path(str(cwd)).expanduser().resolve()
+                except OSError:
+                    return None
+    except OSError:
+        return None
+    return None
+
+
+def _archive_candidate_matches_project(session_path: Path, project_root: Path, source: str) -> bool:
+    session_cwd = _extract_archived_session_cwd(session_path, source)
+    if session_cwd is None:
+        return True
+    return session_cwd == project_root or project_root in session_cwd.parents
+
+
 def format_result(data: Any, format: str) -> str | Dict[str, Any] | List[Dict[str, Any]]:
     """Format plugin results for CLI or tool responses."""
     if format == "json":
@@ -170,9 +210,18 @@ def import_latest_session(
 ) -> Dict[str, Any]:
     """Import the most recent archived session for the given source."""
     archive_root = Path(archived_dir).expanduser().resolve()
-    candidates = sorted(_archive_candidates(archive_root, source), key=lambda path: path.stat().st_mtime, reverse=True)
+    project_root_path = Path(project_root).resolve()
+    candidates = sorted(
+        (
+            path
+            for path in _archive_candidates(archive_root, source)
+            if _archive_candidate_matches_project(path, project_root_path, source)
+        ),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
     if not candidates:
-        raise FileNotFoundError(f"No archived {source} sessions found in {archive_root}")
+        raise FileNotFoundError(f"No archived {source} sessions found for project {project_root_path} in {archive_root}")
     latest = candidates[0]
     stem = sanitize_session_id(latest.stem)
     destination_name = stem if source == "codex" else sanitize_session_id(f"{source}-{stem}")
@@ -200,7 +249,12 @@ def import_all_sessions(
 ) -> Dict[str, Any]:
     """Import all archived sessions for the given source."""
     archive_root = Path(archived_dir).expanduser().resolve()
-    candidates = _archive_candidates(archive_root, source)
+    project_root_path = Path(project_root).resolve()
+    candidates = [
+        path
+        for path in _archive_candidates(archive_root, source)
+        if _archive_candidate_matches_project(path, project_root_path, source)
+    ]
     imported: List[str] = []
     skipped: List[str] = []
     for session_path in candidates:

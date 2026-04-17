@@ -12,6 +12,49 @@ def _format_rate(value: Any) -> str:
     return f"{float(value):.2f}%"
 
 
+def _format_duration(seconds: float) -> str:
+    if seconds <= 0:
+        return "—"
+    if seconds < 60:
+        return f"{seconds:.0f}s"
+    minutes = seconds / 60
+    if minutes < 60:
+        return f"{minutes:.1f}m"
+    hours = minutes / 60
+    return f"{hours:.1f}h"
+
+
+def _format_cost(cost: Any) -> str:
+    if cost is None:
+        return "—"
+    c = float(cost)
+    if c < 0.01:
+        return f"${c:.4f}"
+    return f"${c:.2f}"
+
+
+def _format_cost_cell(summary: Dict[str, Any]) -> str:
+    plan = summary.get("plan_type")
+    cost = summary.get("estimated_cost_usd")
+    if plan:
+        label = plan.capitalize()
+        if cost is not None:
+            return (
+                f"<strong>{label}</strong><span>API-equiv {_format_cost(cost)}</span>"
+            )
+        return f"<strong>{label}</strong><span>cost</span>"
+    return f"<strong>{_format_cost(cost)}</strong><span>cost</span>"
+
+
+def _format_tokens(count: Any) -> str:
+    c = int(count or 0)
+    if c >= 1_000_000:
+        return f"{c / 1_000_000:.1f}M"
+    if c >= 1_000:
+        return f"{c / 1_000:.1f}K"
+    return str(c)
+
+
 def _badge(label: str, tone: str = "neutral") -> str:
     return f'<span class="session-badge {tone}">{escape(label)}</span>'
 
@@ -43,6 +86,14 @@ def _runtime_badges(metadata: Dict[str, Any], summary: Dict[str, Any]) -> str:
         badges.append(_badge(f"plugins {plugin_count}"))
     if int(summary.get("edited_without_prior_read_count", 0) or 0):
         badges.append(_badge("edited without read", "warning"))
+    efficiency = summary.get("efficiency_indicators", {})
+    if efficiency.get("continuation_loops", 0) > 0:
+        badges.append(_badge("continuation loops", "warning"))
+    if efficiency.get("max_tokens_stops", 0) > 0:
+        badges.append(_badge("max-token stops", "warning"))
+    model = summary.get("model")
+    if model:
+        badges.append(_badge(model))
     return "".join(badges)
 
 
@@ -61,27 +112,36 @@ def build_sessions_index_html(entries: Iterable[Dict[str, Any]]) -> str:
     for entry in entries:
         summary = entry["summary"]
         metadata = entry.get("metadata") or {}
-        failures = sum(int(v) for v in summary.get("tool_failures_by_name", {}).values())
+        failures = sum(
+            int(v) for v in summary.get("tool_failures_by_name", {}).values()
+        )
         rows.append(
             f"""
-            <a class="session-row" href="{escape(entry['report_relpath'])}">
+            <a class="session-row" href="{escape(entry["report_relpath"])}">
               <div class="session-row-main">
-                <div class="session-row-kicker">{escape(str(metadata.get('source_name') or 'Imported Session'))}</div>
-                <div class="session-row-title">{escape(str(metadata.get('display_title') or entry['session_name']))}</div>
-                <div class="session-row-subtitle">{escape(str(metadata.get('display_subtitle') or entry['session_name']))}</div>
-                <div class="session-row-context">{escape(str(metadata.get('prompt_excerpt') or ''))}</div>
+                <div class="session-row-kicker">{escape(str(metadata.get("source_name") or "Imported Session"))}</div>
+                <div class="session-row-title">{escape(str(metadata.get("display_title") or entry["session_name"]))}</div>
+                <div class="session-row-subtitle">{escape(str(metadata.get("display_subtitle") or entry["session_name"]))}</div>
+                <div class="session-row-context">{escape(str(metadata.get("prompt_excerpt") or ""))}</div>
                 <div class="session-row-badges">{_runtime_badges(metadata, summary)}</div>
               </div>
-              <div class="session-row-metric">{summary.get('total_tool_calls', 0)}</div>
+              <div class="session-row-metric">{summary.get("total_tool_calls", 0)}</div>
               <div class="session-row-metric session-row-metric-text">{escape(_top_tool(summary))}</div>
-              <div class="session-row-metric">{summary.get('distinct_files_read', 0)}</div>
-              <div class="session-row-metric">{summary.get('distinct_files_edited', 0)}</div>
-              <div class="session-row-metric session-row-metric-stack"><strong>{_format_rate(summary.get('failure_rate_pct', 0))}</strong><span>{failures} failures</span></div>
+              <div class="session-row-metric">{summary.get("distinct_files_read", 0)}</div>
+              <div class="session-row-metric">{summary.get("distinct_files_edited", 0)}</div>
+              <div class="session-row-metric session-row-metric-stack"><strong>{_format_tokens(summary.get("total_tokens", 0))}</strong><span>tokens</span></div>
+              <div class="session-row-metric session-row-metric-stack">{_format_cost_cell(summary)}</div>
+              <div class="session-row-metric session-row-metric-stack"><strong>{_format_duration(summary.get("session_duration_seconds", 0))}</strong><span>duration</span></div>
+              <div class="session-row-metric session-row-metric-stack"><strong>{_format_rate(summary.get("failure_rate_pct", 0))}</strong><span>{failures} failures</span></div>
             </a>
             """
         )
 
-    rows_markup = "\n".join(rows) if rows else '<div class="empty-state">No imported sessions found yet.</div>'
+    rows_markup = (
+        "\n".join(rows)
+        if rows
+        else '<div class="empty-state">No imported sessions found yet.</div>'
+    )
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -114,6 +174,9 @@ def build_sessions_index_html(entries: Iterable[Dict[str, Any]]) -> str:
         <div>Top Tool</div>
         <div>Read</div>
         <div>Edited</div>
+        <div>Tokens</div>
+        <div>Cost</div>
+        <div>Duration</div>
         <div>Failure Rate</div>
       </div>
       <div class="session-grid-body">
