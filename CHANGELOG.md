@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.2 - 2026-04-17
+
+- expanded session metrics and reporting coverage
+- improved generated `index.html` layout behavior on wider screens
+- fixed `Operational Gaps` callout overflow in the HTML report
+
 ## 0.1.0 - 2026-04-14
 
 Initial public-release prep for Harness Observability Layer.
