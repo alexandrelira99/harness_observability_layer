@@ -14,6 +14,7 @@ if str(SRC) not in sys.path:
 
 from harness_observability_layer.plugin.api import generate_session_html, import_session, summarize_session
 from harness_observability_layer.security import redact_path, sanitize_session_id
+from harness_observability_layer.reporting.guided_site import build_guided_session_site
 from observer.analyzer import analyze_jsonl
 from reporting.html_report import build_session_report_html, report_css
 
@@ -170,6 +171,42 @@ class SecurityPrivacyTests(unittest.TestCase):
         self.assertIn("max-width: calc(100vw - 48px);", css)
         self.assertIn("min-width: 0;", css)
         self.assertIn("overflow-wrap: anywhere;", css)
+
+    def test_guided_site_escapes_user_derived_content(self) -> None:
+        rendered = build_guided_session_site(
+            session_name="sess",
+            summary={
+                "total_tokens": 1,
+                "tool_calls_by_name": {},
+                "tool_failures_by_name": {},
+                "files": {},
+            },
+            metadata={"display_title": "<b>unsafe</b>", "display_subtitle": "Local only"},
+            normalized_events_file='"><script>x</script>',
+            events=[],
+        )
+        self.assertNotIn("<script>", rendered["index.html"])
+        self.assertIn("&lt;b&gt;unsafe&lt;/b&gt;", rendered["index.html"])
+
+    def test_guided_site_chart_payload_does_not_emit_script_tags(self) -> None:
+        rendered = build_guided_session_site(
+            session_name="sess",
+            summary={
+                "total_tokens": 1,
+                "tool_calls_by_name": {},
+                "tool_failures_by_name": {},
+                "files": {},
+                "skill_attribution": {
+                    '"><script>x</script>': {"total_tokens": 1, "tool_call_count": 1}
+                },
+                "unattributed_activity": {"total_tokens": 0, "tool_call_count": 0},
+                "attribution_shares": {},
+            },
+            metadata={"display_title": "Session", "display_subtitle": "Local only"},
+            normalized_events_file="events.jsonl",
+            events=[],
+        )
+        self.assertNotIn("<script>x</script>", rendered["cost-efficiency.html"])
 
     def test_redacted_html_hides_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

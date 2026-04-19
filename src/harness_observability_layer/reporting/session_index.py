@@ -5,6 +5,19 @@ from __future__ import annotations
 from html import escape
 from typing import Any, Dict, Iterable
 
+from .guided_site import TRANSLATIONS, _js_object_literal
+
+
+def _text(key: str) -> str:
+    return TRANSLATIONS["eng"].get(key, key)
+
+
+def _i18n_attrs(key: str, default: str | None = None) -> str:
+    fallback = default if default is not None else _text(key)
+    return (
+        f' data-i18n="{escape(key, quote=True)}"'
+        f' data-i18n-default="{escape(fallback, quote=True)}"'
+    )
 
 def _format_rate(value: Any) -> str:
     if value in (None, ""):
@@ -42,8 +55,14 @@ def _format_cost_cell(summary: Dict[str, Any]) -> str:
             return (
                 f"<strong>{label}</strong><span>API-equiv {_format_cost(cost)}</span>"
             )
-        return f"<strong>{label}</strong><span>cost</span>"
-    return f"<strong>{_format_cost(cost)}</strong><span>cost</span>"
+        return (
+            f"<strong>{label}</strong>"
+            f'<span{_i18n_attrs("metrics.cost")}>{escape(_text("metrics.cost").lower())}</span>'
+        )
+    return (
+        f"<strong>{_format_cost(cost)}</strong>"
+        f'<span{_i18n_attrs("metrics.cost")}>{escape(_text("metrics.cost").lower())}</span>'
+    )
 
 
 def _format_tokens(count: Any) -> str:
@@ -105,6 +124,55 @@ def _top_tool(summary: Dict[str, Any]) -> str:
     return f"{name} ({count})"
 
 
+def _index_script() -> str:
+    translations = _js_object_literal(TRANSLATIONS)
+    return f"""
+  <script data-hol="index-ui">
+    (() => {{
+      const messages = {translations};
+      const localeKey = "hol:locale";
+      const themeKey = "hol:theme";
+      const root = document.documentElement;
+      const defaultLocale = root.dataset.locale || "eng";
+      const defaultTheme = root.dataset.theme || "dark";
+
+      const getMessages = (locale) => messages[locale] || messages.eng || {{}};
+      const t = (locale, key) => getMessages(locale)[key] || (messages.eng || {{}})[key] || key;
+
+      const applyLocale = (locale) => {{
+        root.dataset.locale = locale;
+        root.lang = locale === "pt" ? "pt-BR" : locale === "es" ? "es" : "en";
+        document.querySelectorAll("[data-i18n]").forEach((node) => {{
+          node.textContent = t(locale, node.dataset.i18n);
+        }});
+        document.querySelectorAll("[data-locale-option]").forEach((node) => {{
+          node.classList.toggle("is-active", node.dataset.localeOption === locale);
+        }});
+        localStorage.setItem(localeKey, locale);
+      }};
+
+      const applyTheme = (theme) => {{
+        root.dataset.theme = theme;
+        document.querySelectorAll("[data-theme-option]").forEach((node) => {{
+          node.classList.toggle("is-active", node.dataset.themeOption === theme);
+        }});
+        localStorage.setItem(themeKey, theme);
+      }};
+
+      applyTheme(localStorage.getItem("hol:theme") || defaultTheme);
+      applyLocale(localStorage.getItem("hol:locale") || defaultLocale);
+
+      document.querySelectorAll("[data-locale-option]").forEach((node) => {{
+        node.addEventListener("click", () => applyLocale(node.dataset.localeOption));
+      }});
+      document.querySelectorAll("[data-theme-option]").forEach((node) => {{
+        node.addEventListener("click", () => applyTheme(node.dataset.themeOption));
+      }});
+    }})();
+  </script>
+"""
+
+
 def build_sessions_index_html(entries: Iterable[Dict[str, Any]]) -> str:
     """Build a styled index page listing imported sessions."""
     entries = list(entries)
@@ -140,11 +208,11 @@ def build_sessions_index_html(entries: Iterable[Dict[str, Any]]) -> str:
     rows_markup = (
         "\n".join(rows)
         if rows
-        else '<div class="empty-state">No imported sessions found yet.</div>'
+        else f'<div class="empty-state"{_i18n_attrs("index.empty")}>No imported sessions found yet.</div>'
     )
 
     return f"""<!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark" data-locale="eng">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -154,36 +222,52 @@ def build_sessions_index_html(entries: Iterable[Dict[str, Any]]) -> str:
 <body>
   <main class="page-shell">
     <section class="hero">
-      <div class="hero-copy">
-        <p class="eyebrow">Harness Observability Layer</p>
-        <h1>Imported Sessions</h1>
-        <p class="hero-text">
-          Navigate imported agent sessions, compare runtime patterns, and jump into the session reports.
-        </p>
+      <div class="hero-topbar">
+        <div class="hero-heading">
+          <p class="eyebrow"{_i18n_attrs("brand.eyebrow")}>{escape(_text("brand.eyebrow"))}</p>
+          <h1 data-i18n="index.title">Imported Sessions</h1>
+          <p class="hero-text" data-i18n="index.subtitle">
+            Browse imported agent sessions for this project and open guided, session-specific reports with QA, cost, workflow, and raw metric views.
+          </p>
+        </div>
+        <div class="hero-controls">
+          <div class="control-group" data-locale-switcher>
+            <span class="control-label"{_i18n_attrs("controls.language")}>{escape(_text("controls.language"))}</span>
+            <button type="button" class="control-chip" data-locale-option="eng">{escape(_text("controls.eng"))}</button>
+            <button type="button" class="control-chip" data-locale-option="pt">{escape(_text("controls.pt"))}</button>
+            <button type="button" class="control-chip" data-locale-option="es">{escape(_text("controls.es"))}</button>
+          </div>
+          <div class="control-group" data-theme-switcher>
+            <span class="control-label"{_i18n_attrs("controls.theme")}>{escape(_text("controls.theme"))}</span>
+            <button type="button" class="control-chip" data-theme-option="dark">{escape(_text("controls.dark"))}</button>
+            <button type="button" class="control-chip" data-theme-option="light">{escape(_text("controls.light"))}</button>
+          </div>
+        </div>
       </div>
       <div class="hero-panel">
-        <div class="artifact-label">Sessions indexed</div>
+        <div class="artifact-label" data-i18n="index.indexed">Sessions indexed</div>
         <code>{len(entries)}</code>
       </div>
     </section>
 
-    <section class="session-grid" style="margin-top:18px;">
+    <section class="page-section session-grid">
       <div class="session-grid-head">
-        <div>Session Description</div>
-        <div>Tools</div>
-        <div>Top Tool</div>
-        <div>Read</div>
-        <div>Edited</div>
-        <div>Tokens</div>
-        <div>Cost</div>
-        <div>Duration</div>
-        <div>Failure Rate</div>
+        <div data-i18n="index.session_description">Session Description</div>
+        <div data-i18n="index.tools">Tools</div>
+        <div data-i18n="index.top_tool">Top Tool</div>
+        <div data-i18n="index.read">Read</div>
+        <div data-i18n="index.edited">Edited</div>
+        <div data-i18n="metrics.tokens">Tokens</div>
+        <div data-i18n="metrics.cost">Cost</div>
+        <div data-i18n="metrics.duration">Duration</div>
+        <div data-i18n="index.failure_rate">Failure Rate</div>
       </div>
       <div class="session-grid-body">
         {rows_markup}
       </div>
     </section>
   </main>
+{_index_script()}
 </body>
 </html>
 """

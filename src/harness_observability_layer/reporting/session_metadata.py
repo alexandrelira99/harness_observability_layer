@@ -35,6 +35,17 @@ def _strip_shell_prefix(text: str) -> str:
     return "\n".join(lines)
 
 
+def _strip_leading_file_uri(text: str) -> str:
+    stripped = text.strip()
+    cleaned = re.sub(
+        r"^file://\S+?(?:\.html?|\.md|\.json|\.jsonl|\.py|\.txt)\b\s*",
+        "",
+        stripped,
+        flags=re.IGNORECASE,
+    )
+    return cleaned.strip() or stripped
+
+
 def _looks_like_json_blob(text: str) -> bool:
     stripped = text.strip()
     if not stripped:
@@ -91,6 +102,7 @@ def _headline_from_prompt(prompt: str) -> str:
     clean = _clean_text(prompt)
     if not clean:
         return "Untitled Session"
+    clean = _strip_leading_file_uri(clean)
 
     command_headline = _command_headline(clean)
     if command_headline:
@@ -115,11 +127,12 @@ def _headline_from_prompt(prompt: str) -> str:
     return headline
 
 
-def _excerpt_from_prompt(prompt: str, words_limit: int = 18) -> str | None:
+def _excerpt_from_prompt(prompt: str, words_limit: int = 12) -> str | None:
     clean = _clean_text(prompt)
     if not clean:
         return None
     clean = _strip_shell_prefix(clean)
+    clean = _strip_leading_file_uri(clean)
     json_start = clean.find("{")
     if json_start > 0:
         clean = clean[:json_start].strip()

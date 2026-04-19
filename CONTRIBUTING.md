@@ -48,7 +48,7 @@ python -m unittest discover -s tests -p "test_*.py"
 
 If your change affects user-visible behavior, also update the relevant docs:
 
-- `README.md`
+- `README.md` as the primary product-facing document
 - `CHANGELOG.md`
 - `docs/release-hardening-checklist.md`
 - security/privacy docs when relevant

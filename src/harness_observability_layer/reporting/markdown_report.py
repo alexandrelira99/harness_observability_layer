@@ -66,6 +66,19 @@ def _format_tokens(count: int) -> str:
     return str(count)
 
 
+def _format_token_breakdown(summary: Dict[str, Any]) -> str:
+    input_tokens = int(summary.get("total_input_tokens", 0) or 0)
+    cache_tokens = int(summary.get("total_cache_read_tokens", 0) or 0)
+    output_tokens = int(summary.get("total_output_tokens", 0) or 0)
+    if cache_tokens:
+        return (
+            f"{_format_tokens(input_tokens)} in / "
+            f"{_format_tokens(cache_tokens)} cache / "
+            f"{_format_tokens(output_tokens)} out"
+        )
+    return f"{_format_tokens(input_tokens)} in / {_format_tokens(output_tokens)} out"
+
+
 def build_session_markdown(
     session_id: str,
     summary: Dict[str, Any],
@@ -91,7 +104,7 @@ def build_session_markdown(
         f"- Files edited: {summary.get('distinct_files_edited', 0)}",
         f"- Failures: {failures}",
         f"- Turns: {summary.get('turns_per_session', 0)}",
-        f"- Total tokens: {_format_tokens(summary.get('total_tokens', 0))} ({_format_tokens(summary.get('total_input_tokens', 0))} in / {_format_tokens(summary.get('total_output_tokens', 0))} out)",
+        f"- Total tokens: {_format_tokens(summary.get('total_tokens', 0))} ({_format_token_breakdown(summary)})",
         f"- Est. cost: {_format_cost_line(summary)}",
         f"- Cache hit rate: {summary.get('cache_hit_rate_pct', 0):.1f}%",
     ]
