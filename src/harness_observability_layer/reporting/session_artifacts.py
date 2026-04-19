@@ -15,6 +15,7 @@ from harness_observability_layer.observer.analyzer import analyze_jsonl, load_ev
 from harness_observability_layer.observer.logger import JsonlEventLogger
 
 from .html_report import build_session_report_html, report_css
+from .guided_site import build_guided_session_site, report_css as guided_report_css
 from .session_index import build_sessions_index_html
 from .session_metadata import derive_session_metadata
 
@@ -34,6 +35,7 @@ def ensure_project_artifact_dirs(project_root: str | Path) -> Dict[str, Path]:
     artifacts_root.mkdir(parents=True, exist_ok=True)
     sessions_root.mkdir(parents=True, exist_ok=True)
     live_runs_root.mkdir(parents=True, exist_ok=True)
+    (artifacts_root / "page" / "sessions").mkdir(parents=True, exist_ok=True)
     return {
         "artifacts_root": artifacts_root,
         "sessions_root": sessions_root,
@@ -42,6 +44,31 @@ def ensure_project_artifact_dirs(project_root: str | Path) -> Dict[str, Path]:
         "legacy_sessions_root": legacy_sessions_root,
         "legacy_live_runs_root": legacy_live_runs_root,
     }
+
+
+def write_guided_session_site(
+    *,
+    project_root: str | Path,
+    session_name: str,
+    summary: Dict[str, Any],
+    metadata: Dict[str, Any],
+    normalized_path: Path,
+    events: list[dict[str, Any]],
+) -> Path:
+    """Write the guided session reporting site for one imported session."""
+    dirs = ensure_project_artifact_dirs(project_root)
+    guided_root = dirs["artifacts_root"] / "page" / "sessions" / session_name
+    guided_root.mkdir(parents=True, exist_ok=True)
+    rendered = build_guided_session_site(
+        session_name=session_name,
+        summary=summary,
+        metadata=metadata,
+        normalized_events_file=os.path.relpath(normalized_path, guided_root),
+        events=events,
+    )
+    for filename, content in rendered.items():
+        (guided_root / filename).write_text(content, encoding="utf-8")
+    return guided_root
 
 
 def refresh_sessions_index(project_root: str | Path) -> Path:
@@ -81,18 +108,32 @@ def refresh_sessions_index(project_root: str | Path) -> Path:
                 metadata = {**stored_metadata, **metadata}
             except json.JSONDecodeError:
                 metadata = metadata or {}
+        guided_overview_path = (
+            dirs["artifacts_root"] / "page" / "sessions" / session_dir.name / "index.html"
+        )
+        if not guided_overview_path.exists():
+            guided_overview_path = session_dir / "report.html"
         entries.append(
             {
                 "session_name": session_dir.name,
                 "summary": summary,
                 "metadata": metadata,
-                "report_relpath": f"./{escape_path}" if (escape_path := os.path.relpath(session_dir / "report.html", sessions_root)).startswith(".") else f"./{escape_path}",
+                "report_relpath": (
+                    f"./{report_relpath}"
+                    if (
+                        report_relpath := os.path.relpath(
+                            guided_overview_path,
+                            sessions_root,
+                        )
+                    ).startswith(".")
+                    else f"./{report_relpath}"
+                ),
             }
         )
 
     index_html_path = sessions_root / "index.html"
     index_css_path = sessions_root / "report.css"
-    index_css_path.write_text(report_css(), encoding="utf-8")
+    index_css_path.write_text(guided_report_css(), encoding="utf-8")
     index_html_path.write_text(build_sessions_index_html(entries), encoding="utf-8")
     return index_html_path
 
@@ -144,6 +185,14 @@ def import_codex_session_to_dir(
         ),
         encoding="utf-8",
     )
+    guided_site_root = write_guided_session_site(
+        project_root=project_root,
+        session_name=session_dir.name,
+        summary=summary,
+        metadata=metadata,
+        normalized_path=normalized_path,
+        events=events,
+    )
     index_path = refresh_sessions_index(project_root)
     return {
         "summary": summary,
@@ -153,6 +202,7 @@ def import_codex_session_to_dir(
         "metadata_path": metadata_path,
         "report_html_path": report_html_path,
         "report_css_path": report_css_path,
+        "guided_site_root": guided_site_root,
         "index_html_path": index_path,
     }
 
@@ -209,6 +259,14 @@ def import_session_to_dir(
         ),
         encoding="utf-8",
     )
+    guided_site_root = write_guided_session_site(
+        project_root=project_root,
+        session_name=session_dir.name,
+        summary=summary,
+        metadata=metadata,
+        normalized_path=normalized_path,
+        events=events,
+    )
     index_path = refresh_sessions_index(project_root)
     return {
         "summary": summary,
@@ -218,6 +276,7 @@ def import_session_to_dir(
         "metadata_path": metadata_path,
         "report_html_path": report_html_path,
         "report_css_path": report_css_path,
+        "guided_site_root": guided_site_root,
         "index_html_path": index_path,
     }
 

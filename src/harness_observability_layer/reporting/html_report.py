@@ -208,6 +208,19 @@ def _format_tokens(count: int) -> str:
     return str(count)
 
 
+def _format_token_breakdown(summary: Dict[str, Any]) -> str:
+    input_tokens = int(summary.get("total_input_tokens", 0) or 0)
+    cache_tokens = int(summary.get("total_cache_read_tokens", 0) or 0)
+    output_tokens = int(summary.get("total_output_tokens", 0) or 0)
+    if cache_tokens:
+        return (
+            f"{_format_tokens(input_tokens)} in / "
+            f"{_format_tokens(cache_tokens)} cache / "
+            f"{_format_tokens(output_tokens)} out"
+        )
+    return f"{_format_tokens(input_tokens)} in / {_format_tokens(output_tokens)} out"
+
+
 def build_session_report_html(
     session_label: str,
     summary: Dict[str, Any],
@@ -308,7 +321,7 @@ def build_session_report_html(
       <article class="metric-card">
         <div class="metric-label">Total Tokens</div>
         <div class="metric-value">{_format_tokens(summary.get("total_tokens", 0))}</div>
-        <div class="metric-subtle">{_format_tokens(summary.get("total_input_tokens", 0))} in / {_format_tokens(summary.get("total_output_tokens", 0))} out</div>
+        <div class="metric-subtle">{_format_token_breakdown(summary)}</div>
       </article>
       <article class="metric-card">
         <div class="metric-label">Est. Cost</div>

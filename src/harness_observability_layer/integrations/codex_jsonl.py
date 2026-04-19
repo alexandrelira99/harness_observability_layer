@@ -19,8 +19,10 @@ from harness_observability_layer.observer.schemas import (
     FILE_SEARCH,
     SESSION_FINISHED,
     SESSION_STARTED,
+    SKILL_LOADED,
     TASK_FINISHED,
     TASK_STARTED,
+    TOKEN_USAGE,
     TOOL_CALL_FAILED,
     TOOL_CALL_FINISHED,
     TOOL_CALL_STARTED,
@@ -29,6 +31,17 @@ from harness_observability_layer.observer.schemas import (
 
 
 _SED_RANGE_RE = re.compile(r"sed\s+-n\s+'(?P<start>\d+),(?P<end>\d+)p'")
+
+
+def _skill_name_from_path(path: str | None) -> str | None:
+    if not path:
+        return None
+    skill_path = Path(path)
+    if skill_path.name != "SKILL.md":
+        return None
+    if skill_path.parent.parent.name != "skills":
+        return None
+    return skill_path.parent.name or None
 
 
 def _task_id_from_payload(payload: Dict[str, Any], session_id: str) -> str:
@@ -94,11 +107,30 @@ def _parse_apply_patch_input(patch_text: str | None) -> Dict[str, tuple[int, int
 
 
 def _codex_usage_to_canonical(total_usage: Dict[str, Any]) -> Dict[str, int]:
+    input_tokens = int(total_usage.get("input_tokens", 0))
+    cached_input_tokens = int(total_usage.get("cached_input_tokens", 0))
     return {
-        "input_tokens": int(total_usage.get("input_tokens", 0)),
+        # Codex reports cached input inside input_tokens, so split it out to
+        # match the canonical schema used across harnesses.
+        "input_tokens": max(0, input_tokens - cached_input_tokens),
         "output_tokens": int(total_usage.get("output_tokens", 0)),
         "cache_creation_input_tokens": 0,
-        "cache_read_input_tokens": int(total_usage.get("cached_input_tokens", 0)),
+        "cache_read_input_tokens": cached_input_tokens,
+    }
+
+
+def _usage_delta(
+    current_usage: Dict[str, int], baseline_usage: Dict[str, int] | None
+) -> Dict[str, int]:
+    baseline = baseline_usage or {}
+    return {
+        key: max(0, int(current_usage.get(key, 0) or 0) - int(baseline.get(key, 0) or 0))
+        for key in {
+            "input_tokens",
+            "output_tokens",
+            "cache_creation_input_tokens",
+            "cache_read_input_tokens",
+        }
     }
 
 
@@ -114,7 +146,6 @@ def normalize_codex_records(records: Iterable[Dict[str, Any]]) -> List[Event]:
     current_model: str | None = None
     session_token_totals: Dict[str, int] | None = None
     plan_type: str | None = None
-
     for raw in records:
         raw_type = raw.get("type")
         payload = raw.get("payload") or {}
@@ -223,7 +254,21 @@ def normalize_codex_records(records: Iterable[Dict[str, Any]]) -> List[Event]:
             if info and isinstance(info, dict):
                 total_usage = info.get("total_token_usage")
                 if total_usage and isinstance(total_usage, dict):
-                    session_token_totals = _codex_usage_to_canonical(total_usage)
+                    current_usage = _codex_usage_to_canonical(total_usage)
+                    usage_delta = _usage_delta(current_usage, session_token_totals)
+                    session_token_totals = current_usage
+                    if any(usage_delta.values()):
+                        normalized.append(
+                            Event(
+                                event_type=TOKEN_USAGE,
+                                source="codex_jsonl",
+                                session_id=session_id,
+                                task_id=current_task_id,
+                                agent_id=agent_id,
+                                ts=timestamp,
+                                payload={"usage": usage_delta},
+                            )
+                        )
             rate_limits = payload.get("rate_limits")
             if rate_limits and isinstance(rate_limits, dict):
                 pt = rate_limits.get("plan_type")
@@ -340,6 +385,19 @@ def normalize_codex_records(records: Iterable[Dict[str, Any]]) -> List[Event]:
                             ),
                         )
                     )
+                    skill_name = _skill_name_from_path(path)
+                    if skill_name:
+                        normalized.append(
+                            Event(
+                                event_type=SKILL_LOADED,
+                                source="codex_jsonl",
+                                session_id=session_id,
+                                task_id=task_id,
+                                agent_id=agent_id,
+                                ts=timestamp,
+                                payload={"skill_name": skill_name},
+                            )
+                        )
                 elif parsed_type == "search":
                     normalized.append(
                         Event(
@@ -454,13 +512,6 @@ def normalize_codex_records(records: Iterable[Dict[str, Any]]) -> List[Event]:
                 )
             )
             continue
-
-    if session_token_totals is not None:
-        for i in range(len(normalized) - 1, -1, -1):
-            if normalized[i].event_type == TASK_FINISHED:
-                existing = normalized[i].payload.get("usage") or {}
-                normalized[i].payload["usage"] = {**existing, **session_token_totals}
-                break
 
     if plan_type is not None:
         for i in range(len(normalized)):

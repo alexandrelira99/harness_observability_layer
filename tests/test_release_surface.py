@@ -114,6 +114,149 @@ class ReleaseSurfaceTests(unittest.TestCase):
             self.assertIn('"session_id": "rollout-offline"', report_output)
             self.assertTrue((tmp_path / "hol-artifacts" / "sessions" / "rollout-offline" / "report.html").exists())
 
+    def test_cli_import_generates_project_index_linking_to_guided_overview(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            raw_session = tmp_path / "rollout-index.jsonl"
+            raw_session.write_text(
+                json.dumps(
+                    {
+                        "type": "session_meta",
+                        "timestamp": "2026-04-19T00:00:00Z",
+                        "payload": {"id": "sess_index", "cwd": str(tmp_path), "source": "test"},
+                    }
+                )
+                + "\n"
+                + json.dumps(
+                    {
+                        "type": "event_msg",
+                        "timestamp": "2026-04-19T00:00:01Z",
+                        "payload": {"type": "user_message", "message": "index routing"},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            self._run_cli(["import", "session", str(raw_session), "--no-resolve-files"], cwd=tmp_path)
+            index_html = (
+                tmp_path / "hol-artifacts" / "sessions" / "index.html"
+            ).read_text(encoding="utf-8")
+            self.assertIn("./../page/sessions/rollout-index/index.html", index_html)
+            self.assertIn('data-locale-switcher', index_html)
+            self.assertIn('data-theme-switcher', index_html)
+            self.assertIn('data-theme="dark"', index_html)
+
+            index_css = (
+                tmp_path / "hol-artifacts" / "sessions" / "report.css"
+            ).read_text(encoding="utf-8")
+            self.assertIn("--bg: #0b0f14;", index_css)
+            self.assertIn("min-width: 140px;", index_css)
+            self.assertIn("justify-self: start;", index_css)
+
+    def test_project_index_shortens_long_prompt_excerpt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            raw_session = tmp_path / "rollout-long-copy.jsonl"
+            raw_session.write_text(
+                json.dumps(
+                    {
+                        "type": "session_meta",
+                        "timestamp": "2026-04-19T00:00:00Z",
+                        "payload": {"id": "sess_long", "cwd": str(tmp_path), "source": "test"},
+                    }
+                )
+                + "\n"
+                + json.dumps(
+                    {
+                        "type": "event_msg",
+                        "timestamp": "2026-04-19T00:00:01Z",
+                        "payload": {
+                            "type": "user_message",
+                            "message": "essa sessao teve varios usos de skill e varias transicoes de boundary para validar se o resumo nao fica comprido demais na landing page principal do projeto",
+                        },
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            self._run_cli(["import", "session", str(raw_session), "--no-resolve-files"], cwd=tmp_path)
+            index_html = (
+                tmp_path / "hol-artifacts" / "sessions" / "index.html"
+            ).read_text(encoding="utf-8")
+            self.assertIn("essa sessao teve varios usos de skill", index_html)
+            self.assertNotIn("landing page principal do projeto", index_html)
+
+    def test_project_index_strips_leading_file_uri_from_session_title(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            raw_session = tmp_path / "rollout-file-uri.jsonl"
+            raw_session.write_text(
+                json.dumps(
+                    {
+                        "type": "session_meta",
+                        "timestamp": "2026-04-19T00:00:00Z",
+                        "payload": {"id": "sess_uri", "cwd": str(tmp_path), "source": "test"},
+                    }
+                )
+                + "\n"
+                + json.dumps(
+                    {
+                        "type": "event_msg",
+                        "timestamp": "2026-04-19T00:00:01Z",
+                        "payload": {
+                            "type": "user_message",
+                            "message": "file://wsl.localhost/Ubuntu/home/alexandre/projects/lab/harness_observability_layer/hol-artifacts/page/sessions/rollout-abc/index.html essa sessao teve varios usos de skill e varias transicoes",
+                        },
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            self._run_cli(["import", "session", str(raw_session), "--no-resolve-files"], cwd=tmp_path)
+            index_html = (
+                tmp_path / "hol-artifacts" / "sessions" / "index.html"
+            ).read_text(encoding="utf-8")
+            self.assertIn("essa sessao teve varios usos de skill", index_html)
+            self.assertNotIn("file://wsl.localhost", index_html)
+
+    def test_imported_guided_raw_metrics_page_includes_attribution_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            raw_session = tmp_path / "rollout-attribution.jsonl"
+            raw_session.write_text(
+                json.dumps(
+                    {
+                        "type": "session_meta",
+                        "timestamp": "2026-04-19T00:00:00Z",
+                        "payload": {"id": "sess_attr", "cwd": str(tmp_path), "source": "test"},
+                    }
+                )
+                + "\n"
+                + json.dumps(
+                    {
+                        "type": "event_msg",
+                        "timestamp": "2026-04-19T00:00:01Z",
+                        "payload": {"type": "user_message", "message": "attribution check"},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            self._run_cli(["import", "session", str(raw_session), "--no-resolve-files"], cwd=tmp_path)
+            raw_metrics_html = (
+                tmp_path
+                / "hol-artifacts"
+                / "page"
+                / "sessions"
+                / "rollout-attribution"
+                / "raw-metrics.html"
+            ).read_text(encoding="utf-8")
+            self.assertIn("Attribution", raw_metrics_html)
+
     def test_import_all_only_imports_sessions_for_current_project_or_without_cwd(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

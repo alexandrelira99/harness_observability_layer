@@ -7,16 +7,24 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
+from .attribution import (
+    aggregate_skill_attribution,
+    aggregate_unattributed_activity,
+    compute_attribution_shares,
+    derive_attribution_segments,
+)
 from .schemas import (
     AGENT_MESSAGE,
     FILE_EDIT,
     FILE_READ,
     FILE_SEARCH,
     PLUGIN_INVOKED,
+    SESSION_FINISHED,
     SESSION_STARTED,
     SKILL_LOADED,
     TASK_FINISHED,
     TASK_STARTED,
+    TOKEN_USAGE,
     TOOL_CALL_FAILED,
     TOOL_CALL_FINISHED,
     TOOL_CALL_STARTED,
@@ -292,6 +300,14 @@ def compute_metrics(
             reason = payload.get("stop_reason")
             if reason:
                 stop_reasons[reason] += 1
+        elif event_type == TOKEN_USAGE:
+            usage = payload.get("usage") or {}
+            total_input_tokens += int(usage.get("input_tokens", 0))
+            total_output_tokens += int(usage.get("output_tokens", 0))
+            total_cache_creation_tokens += int(
+                usage.get("cache_creation_input_tokens", 0)
+            )
+            total_cache_read_tokens += int(usage.get("cache_read_input_tokens", 0))
         elif event_type == TASK_FINISHED:
             usage = payload.get("usage") or {}
             total_input_tokens += int(usage.get("input_tokens", 0))
@@ -542,6 +558,17 @@ def compute_metrics(
         if session_duration_seconds > 0
         else 0.0,
     }
+    attribution_segments = derive_attribution_segments(events)
+    skill_attribution = aggregate_skill_attribution(attribution_segments)
+    unattributed_activity = aggregate_unattributed_activity(attribution_segments)
+    attribution_shares = compute_attribution_shares(
+        skill_attribution=skill_attribution,
+        unattributed_activity=unattributed_activity,
+        total_tool_calls=total_tool_calls + total_failures,
+        total_tokens=total_tokens,
+        distinct_files_edited=len(distinct_files_edited),
+        session_duration_seconds=session_duration_seconds,
+    )
 
     return {
         "total_events": len(events),
@@ -558,6 +585,7 @@ def compute_metrics(
         "edited_without_prior_read_count": len(edited_without_prior_read),
         "skill_load_count": skill_load_count,
         "skill_loads_by_name": dict(skill_counts),
+        "distinct_skills_loaded": len(skill_counts),
         "plugin_invocation_count": plugin_invocation_count,
         "plugin_invocations_by_name": dict(plugin_counts),
         "file_stats_resolution": "enabled" if resolve_file_stats else "disabled",
@@ -607,4 +635,8 @@ def compute_metrics(
         "read_without_edit": read_without_edit,
         "read_without_edit_count": len(read_without_edit),
         "efficiency_indicators": efficiency_indicators,
+        "skill_attribution": skill_attribution,
+        "unattributed_activity": unattributed_activity,
+        "attribution_shares": attribution_shares,
+        "attribution_segments": attribution_segments,
     }

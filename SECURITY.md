@@ -2,7 +2,14 @@
 
 ## Supported Scope
 
-This project is in active early-stage development. Security fixes will generally target the latest state of `main` first.
+This project is in active development. Security fixes will generally target the latest state of `main` first.
+
+HOL is designed as a local-first analysis and reporting tool for imported agent sessions, so security review is especially sensitive to:
+
+- prompt and tool-output disclosure
+- local path leakage
+- artifact write safety
+- accidental network behavior in offline analysis flows
 
 ## Reporting A Vulnerability
 

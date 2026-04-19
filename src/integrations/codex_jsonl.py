@@ -16,8 +16,10 @@ from observer.schemas import (
     FILE_SEARCH,
     SESSION_FINISHED,
     SESSION_STARTED,
+    SKILL_LOADED,
     TASK_FINISHED,
     TASK_STARTED,
+    TOKEN_USAGE,
     TOOL_CALL_FAILED,
     TOOL_CALL_FINISHED,
     TOOL_CALL_STARTED,
@@ -26,6 +28,17 @@ from observer.schemas import (
 
 
 _SED_RANGE_RE = re.compile(r"sed\s+-n\s+'(?P<start>\d+),(?P<end>\d+)p'")
+
+
+def _skill_name_from_path(path: str | None) -> str | None:
+    if not path:
+        return None
+    skill_path = Path(path)
+    if skill_path.name != "SKILL.md":
+        return None
+    if skill_path.parent.parent.name != "skills":
+        return None
+    return skill_path.parent.name or None
 
 
 def _task_id_from_payload(payload: Dict[str, Any], session_id: str) -> str:
@@ -99,6 +112,34 @@ def normalize_codex_records(records: Iterable[Dict[str, Any]]) -> List[Event]:
     agent_id = "main"
     current_task_id = "task_1"
     turn_counter = 0
+    session_token_totals: Dict[str, int] | None = None
+    def codex_usage_to_canonical(total_usage: Dict[str, Any]) -> Dict[str, int]:
+        input_tokens = int(total_usage.get("input_tokens", 0))
+        cached_input_tokens = int(total_usage.get("cached_input_tokens", 0))
+        return {
+            "input_tokens": max(0, input_tokens - cached_input_tokens),
+            "output_tokens": int(total_usage.get("output_tokens", 0)),
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": cached_input_tokens,
+        }
+
+    def usage_delta(
+        current_usage: Dict[str, int], previous_usage: Dict[str, int] | None
+    ) -> Dict[str, int]:
+        baseline = previous_usage or {}
+        return {
+            key: max(
+                0,
+                int(current_usage.get(key, 0) or 0)
+                - int(baseline.get(key, 0) or 0),
+            )
+            for key in {
+                "input_tokens",
+                "output_tokens",
+                "cache_creation_input_tokens",
+                "cache_read_input_tokens",
+            }
+        }
 
     for raw in records:
         raw_type = raw.get("type")
@@ -136,6 +177,28 @@ def normalize_codex_records(records: Iterable[Dict[str, Any]]) -> List[Event]:
                     payload={},
                 )
             )
+            continue
+
+        if raw_type == "event_msg" and payload_type == "token_count":
+            info = payload.get("info")
+            if info and isinstance(info, dict):
+                total_usage = info.get("total_token_usage")
+                if total_usage and isinstance(total_usage, dict):
+                    current_usage = codex_usage_to_canonical(total_usage)
+                    delta = usage_delta(current_usage, session_token_totals)
+                    session_token_totals = current_usage
+                    if any(delta.values()):
+                        normalized.append(
+                            Event(
+                                event_type=TOKEN_USAGE,
+                                source="codex_jsonl",
+                                session_id=session_id,
+                                task_id=current_task_id,
+                                agent_id=agent_id,
+                                ts=timestamp,
+                                payload={"usage": delta},
+                            )
+                        )
             continue
 
         if raw_type == "item.completed":
@@ -290,6 +353,19 @@ def normalize_codex_records(records: Iterable[Dict[str, Any]]) -> List[Event]:
                             ),
                         )
                     )
+                    skill_name = _skill_name_from_path(path)
+                    if skill_name:
+                        normalized.append(
+                            Event(
+                                event_type=SKILL_LOADED,
+                                source="codex_jsonl",
+                                session_id=session_id,
+                                task_id=task_id,
+                                agent_id=agent_id,
+                                ts=timestamp,
+                                payload={"skill_name": skill_name},
+                            )
+                        )
                 elif parsed_type == "search":
                     normalized.append(
                         Event(
@@ -368,7 +444,10 @@ def normalize_codex_records(records: Iterable[Dict[str, Any]]) -> List[Event]:
                     task_id=task_id,
                     agent_id=agent_id,
                     ts=timestamp,
-                    payload={"outcome": "completed", "last_agent_message": payload.get("last_agent_message")},
+                    payload={
+                        "outcome": "completed",
+                        "last_agent_message": payload.get("last_agent_message"),
+                    },
                 )
             )
             continue
