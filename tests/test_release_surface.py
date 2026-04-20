@@ -374,6 +374,123 @@ class ReleaseSurfaceTests(unittest.TestCase):
             self.assertTrue((project_root / "hol-artifacts" / "sessions" / "rollout-missing-cwd").exists())
             self.assertFalse((project_root / "hol-artifacts" / "sessions" / "rollout-other").exists())
 
+    def test_import_uses_explicit_archive_dir_before_environment_override(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            explicit_root = tmp_path / "explicit-archive"
+            env_root = tmp_path / "env-archive"
+            project_root = tmp_path / "project"
+            explicit_root.mkdir()
+            env_root.mkdir()
+            project_root.mkdir()
+
+            (explicit_root / "rollout-explicit.jsonl").write_text(
+                json.dumps(
+                    {
+                        "type": "session_meta",
+                        "timestamp": "2026-04-16T00:00:00Z",
+                        "payload": {"id": "sess_explicit", "cwd": str(project_root), "source": "codex"},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (env_root / "rollout-env.jsonl").write_text(
+                json.dumps(
+                    {
+                        "type": "session_meta",
+                        "timestamp": "2026-04-16T00:00:00Z",
+                        "payload": {"id": "sess_env", "cwd": str(project_root), "source": "codex"},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch.dict(os.environ, {"HOL_CODEX_ARCHIVED_DIR": str(env_root)}, clear=False):
+                result = import_all_sessions(str(explicit_root), project_root=project_root, resolve_file_stats=False)
+
+            self.assertEqual(result["imported_sessions"], ["rollout-explicit"])
+            self.assertFalse((project_root / "hol-artifacts" / "sessions" / "rollout-env").exists())
+
+    def test_import_uses_environment_archive_dir_when_explicit_dir_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            env_root = tmp_path / "env-archive"
+            project_root = tmp_path / "project"
+            env_root.mkdir()
+            project_root.mkdir()
+
+            session_path = env_root / "rollout-env.jsonl"
+            session_path.write_text(
+                json.dumps(
+                    {
+                        "type": "session_meta",
+                        "timestamp": "2026-04-16T00:00:00Z",
+                        "payload": {"id": "sess_env", "cwd": str(project_root), "source": "codex"},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            os.utime(session_path, (2, 2))
+
+            with mock.patch.dict(os.environ, {"HOL_CODEX_ARCHIVED_DIR": str(env_root)}, clear=False):
+                all_result = import_all_sessions(project_root=project_root, resolve_file_stats=False)
+                latest_result = import_latest_session(project_root=project_root, resolve_file_stats=False)
+
+            self.assertEqual(all_result["imported_sessions"], ["rollout-env"])
+            self.assertEqual(latest_result["session_id"], "rollout-env")
+
+    def test_import_missing_archive_dir_raises_actionable_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            project_root = tmp_path / "project"
+            isolated_home = tmp_path / "home"
+            isolated_xdg = tmp_path / "xdg-data"
+            project_root.mkdir()
+            isolated_home.mkdir()
+            isolated_xdg.mkdir()
+
+            with mock.patch.dict(
+                os.environ,
+                {"HOME": str(isolated_home), "XDG_DATA_HOME": str(isolated_xdg)},
+                clear=True,
+            ):
+                with self.assertRaises(FileNotFoundError) as error:
+                    import_all_sessions(project_root=project_root, resolve_file_stats=False)
+
+            message = str(error.exception)
+            self.assertIn("No archived codex session directory could be resolved", message)
+            self.assertIn("--archived-dir", message)
+            self.assertIn("HOL_CODEX_ARCHIVED_DIR", message)
+
+    def test_cli_import_all_uses_environment_archive_dir_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            env_root = tmp_path / "env-archive"
+            project_root = tmp_path / "project"
+            env_root.mkdir()
+            project_root.mkdir()
+
+            (env_root / "rollout-cli.jsonl").write_text(
+                json.dumps(
+                    {
+                        "type": "session_meta",
+                        "timestamp": "2026-04-16T00:00:00Z",
+                        "payload": {"id": "sess_cli", "cwd": str(project_root), "source": "codex"},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch.dict(os.environ, {"HOL_CODEX_ARCHIVED_DIR": str(env_root)}, clear=False):
+                output = self._run_cli(["import", "all", "--no-resolve-files"], cwd=project_root)
+
+            self.assertIn('"imported_sessions": [', output)
+            self.assertIn('"rollout-cli"', output)
+
     def test_claude_imports_only_current_project_sessions_or_missing_cwd(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

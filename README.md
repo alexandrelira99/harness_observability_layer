@@ -146,8 +146,15 @@ hol import session ~/.codex/archived_sessions/rollout-YYYY-MM-DDTHH-MM-SS-....js
 hol import latest
 ```
 
-This picks the most recently modified eligible `rollout-*.jsonl` from `~/.codex/archived_sessions`.
+By default, HOL resolves the archive directory in this order:
+
+1. `--archived-dir`
+2. `HOL_CODEX_ARCHIVED_DIR` or `CODEX_ARCHIVED_SESSIONS_DIR`
+3. auto-discovery in local defaults such as `~/.config/codex/archived_sessions`, `~/.codex/archived_sessions`, and the XDG data dir variant when `XDG_DATA_HOME` is set
+
+This picks the most recently modified eligible `rollout-*.jsonl` from the first valid directory found.
 Sessions whose recorded `cwd` points at a different directory are skipped. Sessions without a usable `cwd` are still eligible as a fallback.
+If no valid archive directory is found, the command fails with a clear configuration error instead of silently importing nothing.
 
 ### Import all archived Codex sessions
 
@@ -162,6 +169,12 @@ To force reimport:
 hol import all --reimport
 ```
 
+To pin a shared or nonstandard archive location explicitly:
+
+```bash
+hol import all --archived-dir /path/to/archived_sessions
+```
+
 ### Import a Claude Code session
 
 ```bash
@@ -173,6 +186,12 @@ To import the latest Claude session from the default archive tree:
 ```bash
 hol import claude-latest
 ```
+
+Claude archive discovery follows the same precedence with source-specific configuration:
+
+1. `--archived-dir`
+2. `HOL_CLAUDE_ARCHIVED_DIR` or `CLAUDE_ARCHIVED_SESSIONS_DIR`
+3. auto-discovery in local defaults such as `~/.config/claude/projects`, `~/.claude/projects`, and the XDG data dir variant when `XDG_DATA_HOME` is set
 
 Like Codex import, Claude import filters out archived sessions whose recorded `cwd` clearly belongs to another directory. Sessions without a usable `cwd` remain eligible.
 
