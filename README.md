@@ -1,38 +1,37 @@
 # Harness Observability Layer
 
-Harness Observability Layer, or HOL, is a local-first toolkit for importing agent sessions, normalizing them into canonical events, and turning them into actionable reports.
+Harness Observability Layer, or HOL, is a local-first dashboard for inspecting archived agent sessions from the current project.
 
-Today the project is more than a thin metrics MVP. It supports:
+Today HOL centers on a localhost experience:
 
-- importing archived Codex sessions
-- importing archived Claude Code sessions
-- generating canonical normalized JSONL events
-- computing session summaries and richer attribution metrics
-- building static HTML reporting surfaces
-- comparing and summarizing sessions from the CLI
-- producing project-level indexes and portfolio-style markdown views
+- it discovers Codex and Claude Code session archives that belong to the current repository
+- it normalizes those sessions into a shared event model in memory
+- it computes aggregate metrics, prompt-group rankings, turn rankings, and prescriptive insights
+- it serves a project dashboard locally at `http://localhost`
 
-The core idea is simple: if you already have agent session archives, HOL helps you inspect how the work happened, not just what the final answer was.
+The main product experience is one command:
 
-## What HOL Is Good For
+```bash
+hol init
+```
 
-Common use cases include:
+## What HOL Does Today
 
-- reviewing how an agent used tools, files, and skills during a session
-- auditing whether edits happened before reads
-- understanding token usage, cache behavior, duration, and failure rates
-- comparing multiple sessions for quality or efficiency differences
-- building a local artifact trail for debugging agent workflows
-- generating shareable static reports without needing a running server
+HOL is built for questions like:
 
-## Current Product Surface
+- where did spend accumulate in this project
+- which prompts or turns were disproportionately expensive
+- whether long context or missing `/clear` is driving cost
+- whether model choice looks justified
+- which sessions deserve review first
 
-HOL currently has four practical layers:
+The dashboard is project-level first. It gives you one entrypoint with:
 
-1. Importers for Codex and Claude Code archived sessions
-2. A canonical event pipeline that normalizes raw session logs
-3. A metrics and attribution layer that computes summaries from normalized events
-4. Static reporting outputs, including a guided dashboard-style site and a project sessions index
+- aggregate spend and token cards
+- prompt-group and turn rankings
+- model mix and daily trends
+- sessions requiring attention
+- prescriptive insights based on the imported session behavior
 
 ## Install
 
@@ -40,13 +39,13 @@ HOL currently has four practical layers:
 pip install harness-observability-layer
 ```
 
-This exposes the unified CLI:
+This exposes:
 
 ```bash
 hol --help
 ```
 
-You can also invoke the package directly:
+You can also run the package directly during development:
 
 ```bash
 python -m harness_observability_layer --help
@@ -68,283 +67,145 @@ pip install -e .[dev]
 
 ## Quick Start
 
-The most common path is:
+From the project you want to inspect:
 
 ```bash
-hol import latest
-hol analyze latest --format markdown
+hol init
 ```
 
-If you are developing from this repository and want to be sure you are using the local checkout instead of an older installed package, prefer:
+That starts a local dashboard server and opens the browser to:
+
+```text
+http://localhost:3845
+```
+
+Useful variants:
 
 ```bash
-PYTHONPATH=src python3 -m harness_observability_layer.cli.main --project-root . import latest
+hol init --no-open
+hol init --port 4000
+hol init --resolve-files
 ```
 
-## CLI Commands
-
-The command surface is intentionally small and stable:
-
-### Import
+If you want the aggregate payload that powers the dashboard:
 
 ```bash
-hol import session <path>
-hol import latest
-hol import all
-hol import claude-session <path>
-hol import claude-latest
-hol import claude-all
+hol data
 ```
 
-Useful flags:
+## CLI Surface
 
-- `--reimport`
-- `--no-raw-copy`
-- `--no-resolve-files`
+HOL currently exposes a deliberately small command surface:
 
-### Analyze
+### Start the dashboard
 
 ```bash
-hol analyze session <session-id> --format markdown
-hol analyze latest --format markdown
-hol analyze compare <session-a> <session-b>
+hol init
 ```
 
-### Report
+Flags:
+
+- `--port`
+- `--host`
+- `--no-open`
+- `--resolve-files`
+
+### Print the live aggregate JSON
 
 ```bash
-hol report html <session-id>
-hol report markdown <session-id>
-hol report summary <session-id> --format json
+hol data
 ```
 
-### Index And Review
+Flags:
 
-```bash
-hol list --limit 5
-hol portfolio --limit 10
-hol failures --min-failures 1
+- `--resolve-files`
+
+## Local Server
+
+When HOL is running, it serves:
+
+- `/` for the dashboard HTML
+- `/api/data` for the current aggregate JSON
+- `/api/refresh` to rebuild the in-memory aggregate and return a small status payload
+
+The default bind is:
+
+```text
+127.0.0.1:3845
 ```
 
-## Import Flows
+## Session Discovery
 
-### Import an existing Codex session
+HOL automatically looks for both Codex and Claude Code archives and filters them to the current project when the archived session records a matching `cwd`.
 
-```bash
-hol import session ~/.codex/archived_sessions/rollout-YYYY-MM-DDTHH-MM-SS-....jsonl
-```
+### Codex discovery
 
-Privacy-oriented variant:
+Resolution order:
 
-```bash
-hol import session ~/.codex/archived_sessions/rollout-YYYY-MM-DDTHH-MM-SS-....jsonl --no-raw-copy --no-resolve-files
-```
+1. `HOL_CODEX_ARCHIVED_DIR`
+2. `CODEX_ARCHIVED_SESSIONS_DIR`
+3. auto-discovery of local defaults such as:
+   - `$XDG_DATA_HOME/codex/archived_sessions`
+   - `~/.config/codex/archived_sessions`
+   - `~/.codex/archived_sessions`
 
-### Import the latest archived Codex session
+### Claude Code discovery
 
-```bash
-hol import latest
-```
+Resolution order:
 
-Without `--archived-dir`, the generic `hol import latest` first tries Codex and automatically falls back to Claude Code when no eligible Codex session is available for the current project.
+1. `HOL_CLAUDE_ARCHIVED_DIR`
+2. `CLAUDE_ARCHIVED_SESSIONS_DIR`
+3. auto-discovery of local defaults such as:
+   - `$XDG_DATA_HOME/claude/projects`
+   - `~/.config/claude/projects`
+   - `~/.claude/projects`
 
-By default, HOL resolves the archive directory in this order:
+Sessions without a usable `cwd` remain eligible. Sessions that clearly belong to another project are skipped.
 
-1. `--archived-dir`
-2. `HOL_CODEX_ARCHIVED_DIR` or `CODEX_ARCHIVED_SESSIONS_DIR`
-3. auto-discovery in local defaults such as `~/.config/codex/archived_sessions`, `~/.codex/archived_sessions`, and the XDG data dir variant when `XDG_DATA_HOME` is set
+## Privacy And Security
 
-This picks the most recently modified eligible `rollout-*.jsonl` from the first valid directory found.
-Sessions whose recorded `cwd` points at a different directory are skipped. Sessions without a usable `cwd` are still eligible as a fallback.
-If no valid archive directory is found, the command fails with a clear configuration error instead of silently importing nothing.
+HOL is intended to stay local-first.
 
-### Import all archived Codex sessions
+Current behavior:
 
-```bash
-hol import all
-```
+- session archives are read from local disk
+- normalization and aggregation happen in memory
+- the dashboard is served from localhost
+- HOL does not require a remote backend to produce the dashboard
 
-Without `--archived-dir`, the generic `hol import all` first tries Codex and automatically falls back to Claude Code when no eligible Codex sessions are available for the current project.
+The localhost dashboard currently exposes project aggregates through `/api/data`, so it should be treated as local sensitive data while the server is running.
 
-By default, existing imported session folders are skipped.
-To force reimport:
+Security-sensitive areas for this repository include:
 
-```bash
-hol import all --reimport
-```
+- session prompt and tool-output disclosure
+- local path leakage
+- archive discovery and filtering
+- hidden network behavior
+- localhost exposure beyond the intended interface
 
-To pin a shared or nonstandard archive location explicitly:
+See also:
 
-```bash
-hol import all --archived-dir /path/to/archived_sessions
-```
-
-### Import a Claude Code session
-
-```bash
-hol import claude-session ~/.claude/projects/<project>/<session>.jsonl
-```
-
-To import the latest Claude session from the default archive tree:
-
-```bash
-hol import claude-latest
-```
-
-Claude archive discovery follows the same precedence with source-specific configuration:
-
-1. `--archived-dir`
-2. `HOL_CLAUDE_ARCHIVED_DIR` or `CLAUDE_ARCHIVED_SESSIONS_DIR`
-3. auto-discovery in local defaults such as `~/.config/claude/projects`, `~/.claude/projects`, and the XDG data dir variant when `XDG_DATA_HOME` is set
-
-Like Codex import, Claude import filters out archived sessions whose recorded `cwd` clearly belongs to another directory. Sessions without a usable `cwd` remain eligible.
-
-## Generated Artifacts
-
-Each imported session creates a project-local artifact folder such as:
-
-- `hol-artifacts/sessions/<session-name>/raw.codex.jsonl`
-- `hol-artifacts/sessions/<session-name>/normalized.events.jsonl`
-- `hol-artifacts/sessions/<session-name>/summary.json`
-- `hol-artifacts/sessions/<session-name>/metadata.json`
-- `hol-artifacts/sessions/<session-name>/report.html`
-- `hol-artifacts/sessions/<session-name>/report.css`
-
-HOL also generates the guided reporting site for each imported session under:
-
-- `hol-artifacts/page/sessions/<session-name>/index.html`
-- `hol-artifacts/page/sessions/<session-name>/workflow-trace.html`
-- `hol-artifacts/page/sessions/<session-name>/qa-report.html`
-- `hol-artifacts/page/sessions/<session-name>/cost-efficiency.html`
-- `hol-artifacts/page/sessions/<session-name>/raw-metrics.html`
-- `hol-artifacts/page/sessions/<session-name>/glossary.html`
-
-And it refreshes the project-level landing page:
-
-- `hol-artifacts/sessions/index.html`
-
-## Guided Report Tabs
-
-The guided site is the most important reporting surface in the current product.
-
-### Workflow Trace
-
-This is the operational overview tab for one session.
-Use it to inspect:
-
-- skill activity
-- top tools
-- event timeline
-- attribution segments
-- most-touched files
-
-This is usually the best first page when you want to understand how a session unfolded.
-
-### QA Report
-
-This tab highlights quality and workflow-risk signals, including:
-
-- edited-without-read behavior
-- QA-oriented insight cards
-- suspicious workflow patterns worth reviewing
-
-### Cost & Efficiency
-
-This tab focuses on session economics and throughput:
-
-- token totals
-- cache behavior
-- cost estimates
-- tokens by skill
-- skill token breakdown
-
-Use it when comparing a “good answer but expensive session” against a more efficient one.
-
-### Raw Metrics
-
-This tab is the audit-friendly layer.
-It renders the `summary.json` content directly and pairs it with attribution tables so you can move from high-level UI back to concrete serialized metrics.
-
-### Glossary
-
-This tab explains the abstract reporting terms that show up in the guided site and in `summary.json`, including:
-
-- skill segments
-- boundary types
-- tool calling types
-- skill attribution buckets
-
-Use it when onboarding someone new to the reporting model or when a metric label feels too internal.
-
-## Project Landing Page
-
-The project-level landing page at `hol-artifacts/sessions/index.html` is now a dashboard-style overview of imported sessions.
-
-It helps answer questions like:
-
-- which session should I open first
-- which session had the most tool activity
-- which one had the highest failure rate
-- which session appears unusually expensive or long
-
-From there, each row links into the guided site for that specific session.
-
-## Security And Privacy
-
-HOL is a local-first analysis tool.
-
-- `hol import`, `hol analyze`, `hol report`, `hol list`, `hol portfolio`, and `hol failures` operate on local files.
-- HOL does not upload imported conversations, prompts, tool outputs, or reports by default.
-- HOL stores imported raw sessions and derived artifacts only in local paths you control.
-- Some metrics such as `total_lines` and read coverage are optional local enrichments derived from the current filesystem state.
-
-Privacy controls available now:
-
-- `--no-raw-copy`
-- `--no-resolve-files`
-- `--redact-sensitive`
-
-Additional review docs:
-
-- [docs/security-and-privacy-review-plan.md](docs/security-and-privacy-review-plan.md)
-- [docs/security-audit-inventory.md](docs/security-audit-inventory.md)
-- [docs/release-hardening-checklist.md](docs/release-hardening-checklist.md)
-- [CHANGELOG.md](CHANGELOG.md)
 - [SECURITY.md](SECURITY.md)
+- [CHANGELOG.md](CHANGELOG.md)
 - [CONTRIBUTING.md](CONTRIBUTING.md)
-- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 
-## Repository-Local Runtime Wrapper
+## Local Development
 
-The published package centers on the `hol` CLI for imports, summaries, comparisons, and reports.
-The live Codex runtime wrapper remains a repository-local helper:
+Run the test suite with:
 
 ```bash
-PYTHONPATH=src .venv/bin/python scripts/run_codex_observed.py \
-  "Say only OK" \
-  --cwd /path/to/project
+python -m unittest discover -s tests
 ```
 
-This wrapper:
+If you want to test the local checkout directly:
 
-- runs `codex exec --json`
-- saves the raw Codex JSONL stream
-- normalizes it into canonical events
-- writes `summary.json`
-- writes a styled `report.html`
-- prints a metrics summary
+```bash
+PYTHONPATH=src python3 -m harness_observability_layer.cli.main --project-root . init --no-open
+```
 
-By default, live runs are saved under `hol-artifacts/live_runs/run_###/`.
+## Repository-Local Helper
 
-## Open The Reports
-
-The generated HTML is static and does not require a server.
-
-Recommended entry points:
-
-- `hol-artifacts/sessions/index.html` for the project landing page
-- `hol-artifacts/page/sessions/<session-name>/index.html` for the guided site of one session
-- `hol-artifacts/sessions/<session-name>/report.html` for the legacy single-page report
+This repository still contains lower-level normalization, metrics, and reporting modules that are useful for development and internal testing. The public user-facing product, however, is the localhost dashboard started by `hol init`.
 
 ## Citation
 

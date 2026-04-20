@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.0 - 2026-04-20
+
+- simplified the public CLI around `hol init` and `hol data`
+- introduced a localhost-first dashboard flow with `/api/data` and `/api/refresh`
+- added live project aggregation directly from Codex and Claude Code archives without requiring exported project artifacts as the primary user journey
+- refreshed the dashboard UI for stronger card hierarchy, responsive layout behavior, and a self-contained live theme
+- updated root documentation to describe the current localhost product surface
+
 ## 1.0.2 - 2026-04-20
 
 - made generic `hol import all` and `hol import latest` fall back to Claude Code when Codex is unavailable for the current project
@@ -18,12 +26,6 @@
 - redesigned the generated HTML surfaces with a dashboard-style visual system for both project and session reports
 - added interface localization support for `ENG`, `PT`, and `ES`
 - added persisted `Dark` and `Light` display modes for the static reporting UI
-
-## Unreleased
-
-- clarified project positioning and reporting surfaces in `README.md`
-- documented guided report tabs, project landing page, and common use cases
-- updated root-level documentation to better match the current product surface
 
 ## 0.1.2 - 2026-04-17
 

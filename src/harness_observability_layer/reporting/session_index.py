@@ -229,6 +229,10 @@ def build_sessions_index_html(entries: Iterable[Dict[str, Any]]) -> str:
           <p class="hero-text" data-i18n="index.subtitle">
             Browse imported agent sessions for this project and open guided, session-specific reports with QA, cost, workflow, and raw metric views.
           </p>
+          <div class="hero-actions" style="display:flex; gap:12px; flex-wrap:wrap; margin-top:16px;">
+            <a class="control-chip" href="./../page/project/index.html">Open Project Dashboard</a>
+            <a class="control-chip" href="./../project/summary.json">Project Aggregate JSON</a>
+          </div>
         </div>
         <div class="hero-controls">
           <div class="control-group" data-locale-switcher>

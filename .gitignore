@@ -21,6 +21,7 @@ dist/
 .coverage.*
 htmlcov/
 docs/
+claude-spend/
 
 # Local generated artifacts
 artifacts/

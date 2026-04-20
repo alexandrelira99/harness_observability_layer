@@ -8,8 +8,8 @@ HOL is designed as a local-first analysis and reporting tool for imported agent 
 
 - prompt and tool-output disclosure
 - local path leakage
-- artifact write safety
-- accidental network behavior in offline analysis flows
+- localhost server exposure and bind safety
+- accidental network behavior in local dashboard flows
 
 ## Reporting A Vulnerability
 

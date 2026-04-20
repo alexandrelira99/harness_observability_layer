@@ -8,9 +8,17 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
 from harness_observability_layer.observer.analyzer import analyze_jsonl, load_events
+from harness_observability_layer.observer.metrics import compute_metrics
+from harness_observability_layer.integrations.codex_jsonl import (
+    normalize_codex_jsonl_file,
+)
+from harness_observability_layer.integrations.claude_code_jsonl import (
+    normalize_claude_code_jsonl_file,
+)
 from harness_observability_layer.reporting import (
     build_session_report_html,
     build_session_text,
+    build_project_aggregate_from_sessions,
     ensure_project_artifact_dirs,
     import_claude_code_session_to_dir,
     import_codex_session_to_dir,
@@ -232,6 +240,62 @@ def format_result(data: Any, format: str) -> str | Dict[str, Any] | List[Dict[st
     if isinstance(data, str):
         return data
     return json.dumps(data, indent=2)
+
+
+def _normalize_source_session(path: Path, source: str) -> List[Dict[str, Any]]:
+    if source == "codex":
+        return [event.to_dict() for event in normalize_codex_jsonl_file(path)]
+    if source == "claude":
+        return [event.to_dict() for event in normalize_claude_code_jsonl_file(path)]
+    raise ValueError(f"Unsupported source: {source}")
+
+
+def load_live_dashboard_data(
+    project_root: str | Path = ".",
+    *,
+    resolve_file_stats: bool = False,
+) -> Dict[str, Any]:
+    """Load current project sessions directly from archive sources without materializing artifacts."""
+    project_root_path = Path(project_root).resolve()
+    session_entries: List[Dict[str, Any]] = []
+    used_session_names: set[str] = set()
+
+    for source in ("codex", "claude"):
+        try:
+            archive_root = _resolve_archive_root(None, source=source)
+        except FileNotFoundError:
+            continue
+
+        candidates = [
+            path
+            for path in _archive_candidates(archive_root, source)
+            if _archive_candidate_matches_project(path, project_root_path, source)
+        ]
+        for session_path in candidates:
+            events = _normalize_source_session(session_path, source)
+            if not events:
+                continue
+            summary = compute_metrics(events, resolve_file_stats=resolve_file_stats)
+            session_name = sanitize_session_id(session_path.stem)
+            if session_name in used_session_names:
+                session_name = sanitize_session_id(f"{session_name}-{source}")
+            used_session_names.add(session_name)
+            metadata = derive_session_metadata(
+                session_name, events, include_prompt_excerpt=True
+            )
+            metadata["source_name"] = "Codex" if source == "codex" else "Claude Code"
+            metadata["archive_path"] = str(session_path)
+            session_entries.append(
+                {
+                    "session_name": session_name,
+                    "summary": summary,
+                    "metadata": metadata,
+                    "events": events,
+                    "guided_report_relpath": "",
+                }
+            )
+
+    return build_project_aggregate_from_sessions(session_entries)
 
 
 def import_session(

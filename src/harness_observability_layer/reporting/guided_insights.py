@@ -118,6 +118,217 @@ def build_overview_insights(summary: Dict[str, Any]) -> List[Dict[str, str]]:
     return cards[:5]
 
 
+def _project_card(
+    title: str,
+    interpretation: str,
+    evidence: str,
+    recommendation: str,
+    *,
+    severity: str = "medium",
+) -> Dict[str, str]:
+    return {
+        "title": title,
+        "interpretation": interpretation,
+        "evidence": f"Evidence: {evidence}",
+        "recommendation": recommendation,
+        "severity": severity,
+    }
+
+
+def build_project_overview_insights(aggregate: Dict[str, Any]) -> List[Dict[str, str]]:
+    cards: List[Dict[str, str]] = []
+    totals = aggregate.get("totals") or {}
+    top_turns = aggregate.get("top_turns") or []
+    top_prompt_groups = aggregate.get("top_prompt_groups") or []
+    session_rankings = aggregate.get("session_rankings") or []
+    sessions = aggregate.get("sessions") or []
+
+    if totals.get("sessions", 0):
+        avg_cost = float(totals.get("estimated_cost_usd", 0) or 0) / max(
+            int(totals.get("sessions", 0) or 0), 1
+        )
+        cards.append(
+            _project_card(
+                "Single Project Control Plane",
+                "The project now has enough imported session data to prioritize investigation from one aggregate view.",
+                f"{int(totals.get('sessions', 0) or 0)} sessions, {int(totals.get('prompt_groups', 0) or 0)} prompt groups, average session cost ${avg_cost:.2f}",
+                "Use the project dashboard as the default entrypoint and only drill into sessions after a ranked prompt or turn stands out.",
+                severity="info",
+            )
+        )
+
+    if top_turns:
+        top_cost = float(top_turns[0].get("estimated_cost_usd", 0) or 0)
+        median_index = min(len(top_turns) - 1, max(0, len(top_turns) // 2))
+        median_cost = float(top_turns[median_index].get("estimated_cost_usd", 0) or 0)
+        if top_cost > 0 and median_cost > 0 and top_cost >= median_cost * 3:
+            cards.append(
+                _project_card(
+                    "Strong /clear Opportunity",
+                    "One turn is dramatically more expensive than a typical expensive turn, which usually signals context buildup rather than intrinsically harder work.",
+                    f"top ranked turn cost ${top_cost:.2f} versus comparison turn ${median_cost:.2f}",
+                    "Recommend `/clear` before task shifts or before the spike-prone segment, then continue in a fresh context window.",
+                    severity="high",
+                )
+            )
+
+    long_context_sessions = [
+        item
+        for item in session_rankings
+        if float(item.get("continuation_loops", 0) or 0) > 0
+        or float(item.get("max_tokens_stops", 0) or 0) > 0
+    ]
+    if long_context_sessions:
+        cards.append(
+            _project_card(
+                "Long Context Pressure",
+                "Several sessions show continuation or max-token behavior, which usually means the work is stretching past a healthy context size.",
+                f"{len(long_context_sessions)} sessions with continuation loops or max-token stops",
+                "Split exploratory work into smaller sessions and reset context sooner when the task changes or the agent starts slowing down.",
+                severity="high",
+            )
+        )
+
+    high_failure_sessions = [
+        item
+        for item in session_rankings
+        if float(item.get("failure_rate_pct", 0) or 0) >= 10
+    ]
+    if high_failure_sessions:
+        cards.append(
+            _project_card(
+                "Operational Friction Concentration",
+                "Some high-cost sessions are also spending effort on avoidable failures instead of forward progress.",
+                f"{len(high_failure_sessions)} sessions have failure rate at or above 10%",
+                "Triage the fragile tool paths first because reducing retries lowers both spend and attention drag.",
+                severity="medium",
+            )
+        )
+
+    repeated_heavy_startup = 0
+    for session in sessions:
+        prompt_groups = session.get("prompt_groups") or []
+        if not prompt_groups:
+            continue
+        first_group = prompt_groups[0]
+        if (
+            int(first_group.get("tool_call_count", 0) or 0) == 0
+            and int(first_group.get("input_tokens", 0) or 0) >= 1000
+        ):
+            repeated_heavy_startup += 1
+    if repeated_heavy_startup >= 2:
+        cards.append(
+            _project_card(
+                "Repeated Startup Overhead",
+                "Multiple sessions are paying a large first-prompt cost before meaningful tool activity begins.",
+                f"{repeated_heavy_startup} sessions start with high-input prompt groups and no tool work",
+                "Trim repeated bootstrap context, move reusable setup into shorter instructions, and avoid re-sending large repo preambles when not needed.",
+                severity="medium",
+            )
+        )
+
+    return cards[:6]
+
+
+def build_project_cost_insights(aggregate: Dict[str, Any]) -> List[Dict[str, str]]:
+    cards: List[Dict[str, str]] = []
+    totals = aggregate.get("totals") or {}
+    model_breakdown = aggregate.get("model_breakdown") or []
+    top_prompt_groups = aggregate.get("top_prompt_groups") or []
+
+    total_tokens = int(totals.get("total_tokens", 0) or 0)
+    total_cost = float(totals.get("estimated_cost_usd", 0) or 0)
+    cache_read = int(totals.get("total_cache_read_tokens", 0) or 0)
+    if total_tokens > 0:
+        cache_share = (cache_read / total_tokens) * 100
+        if cache_share >= 40:
+            cards.append(
+                _project_card(
+                    "Cache-Heavy Cost Profile",
+                    "A large slice of token volume is context replay, which is often a symptom of long-running conversations.",
+                    f"{cache_read:,} cache-read tokens out of {total_tokens:,} total tokens ({cache_share:.1f}%)",
+                    "Review the sessions with the largest late-turn costs and reset context more aggressively when a task boundary appears.",
+                    severity="medium",
+                )
+            )
+    if total_cost >= 1 and top_prompt_groups:
+        top_prompt = top_prompt_groups[0]
+        cards.append(
+            _project_card(
+                "Prompt Spend Is Concentrated",
+                "A small number of prompt groups are likely driving a disproportionate share of project cost.",
+                f"top prompt group '{top_prompt.get('prompt_excerpt') or '(no prompt)'}' costs about ${float(top_prompt.get('estimated_cost_usd', 0) or 0):.2f}",
+                "Start optimization with the top prompt groups because they give the fastest path to lower project spend.",
+                severity="medium",
+            )
+        )
+    if len(model_breakdown) >= 2:
+        priciest = model_breakdown[0]
+        cheapest = model_breakdown[-1]
+        if (
+            float(priciest.get("cost", 0) or 0) > float(cheapest.get("cost", 0) or 0)
+            and int(priciest.get("tool_calls", 0) or 0) <= int(cheapest.get("tool_calls", 0) or 0)
+        ):
+            cards.append(
+                _project_card(
+                    "Model Choice Review",
+                    "The most expensive model is not obviously buying more operational throughput than cheaper alternatives.",
+                    f"{priciest.get('model')} cost ${float(priciest.get('cost', 0) or 0):.2f} across {int(priciest.get('tool_calls', 0) or 0)} tool calls",
+                    "Shift default exploratory or operational work to the cheaper model and reserve the premium model for the sessions that really need deep reasoning.",
+                    severity="high",
+                )
+            )
+    return cards[:4]
+
+
+def build_project_prompt_insights(aggregate: Dict[str, Any]) -> List[Dict[str, str]]:
+    cards: List[Dict[str, str]] = []
+    top_prompt_groups = aggregate.get("top_prompt_groups") or []
+    if not top_prompt_groups:
+        return cards
+
+    prompt_hash_counts: Dict[str, int] = {}
+    for item in top_prompt_groups:
+        prompt_hash = str(item.get("prompt_hash") or "")
+        if prompt_hash:
+            prompt_hash_counts[prompt_hash] = prompt_hash_counts.get(prompt_hash, 0) + 1
+    repeated_prompt = next(
+        (
+            item
+            for item in top_prompt_groups
+            if prompt_hash_counts.get(str(item.get("prompt_hash") or ""), 0) >= 2
+        ),
+        None,
+    )
+    if repeated_prompt:
+        cards.append(
+            _project_card(
+                "Repeated Expensive Prompt Pattern",
+                "The same prompt shape appears multiple times among the highest-cost prompt groups, which suggests repeated overhead rather than one isolated outlier.",
+                f"prompt hash {repeated_prompt.get('prompt_hash')} repeats in the expensive prompt ranking",
+                "Consolidate or shorten that repeated setup prompt so future sessions do not keep paying the same initialization cost.",
+                severity="medium",
+            )
+        )
+    long_prompt_groups = [
+        item
+        for item in top_prompt_groups
+        if int(item.get("total_tokens", 0) or 0) >= 5000
+        and int(item.get("tool_call_count", 0) or 0) <= 1
+    ]
+    if long_prompt_groups:
+        cards.append(
+            _project_card(
+                "High-Context Low-Action Prompt Group",
+                "Some expensive prompt groups are spending a lot of tokens without much tool activity, which often means context packaging is too heavy.",
+                f"{len(long_prompt_groups)} top prompt groups have high token volume with at most one tool call",
+                "Reduce prompt boilerplate and move non-essential context out of the hot path so the model starts doing useful work earlier.",
+                severity="medium",
+            )
+        )
+    return cards[:4]
+
+
 def build_qa_insights(summary: Dict[str, Any]) -> List[Dict[str, str]]:
     cards: List[Dict[str, str]] = []
     edited_without_read = int(summary.get("edited_without_prior_read_count", 0) or 0)

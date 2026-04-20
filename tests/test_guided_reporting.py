@@ -65,6 +65,12 @@ class GuidedReportingTests(unittest.TestCase):
             self.assertTrue((guided_root / "workflow-trace.html").exists())
             self.assertTrue((guided_root / "raw-metrics.html").exists())
             self.assertIn("guided_site_root", result)
+            self.assertTrue(
+                (tmp_path / "hol-artifacts" / "page" / "project" / "index.html").exists()
+            )
+            self.assertTrue(
+                (tmp_path / "hol-artifacts" / "project" / "summary.json").exists()
+            )
 
     def test_overview_insights_include_evidence_lines(self) -> None:
         from harness_observability_layer.reporting.guided_insights import (
@@ -92,6 +98,65 @@ class GuidedReportingTests(unittest.TestCase):
         self.assertTrue(cards)
         self.assertTrue(all(card["title"] for card in cards))
         self.assertTrue(all(card["evidence"].startswith("Evidence:") for card in cards))
+
+    def test_project_insights_include_recommendations(self) -> None:
+        from harness_observability_layer.reporting.guided_insights import (
+            build_project_cost_insights,
+            build_project_overview_insights,
+            build_project_prompt_insights,
+        )
+
+        aggregate = {
+            "totals": {
+                "sessions": 3,
+                "prompt_groups": 6,
+                "turns": 7,
+                "total_tokens": 120000,
+                "estimated_cost_usd": 2.8,
+                "total_cache_read_tokens": 60000,
+            },
+            "top_turns": [
+                {"estimated_cost_usd": 1.5, "ordinal": 6},
+                {"estimated_cost_usd": 0.2, "ordinal": 2},
+                {"estimated_cost_usd": 0.15, "ordinal": 3},
+            ],
+            "top_prompt_groups": [
+                {
+                    "prompt_excerpt": "bootstrap repo context",
+                    "estimated_cost_usd": 1.2,
+                    "prompt_hash": "abc123",
+                    "total_tokens": 8000,
+                    "tool_call_count": 1,
+                },
+                {
+                    "prompt_excerpt": "bootstrap repo context",
+                    "estimated_cost_usd": 0.8,
+                    "prompt_hash": "abc123",
+                    "total_tokens": 6200,
+                    "tool_call_count": 1,
+                },
+            ],
+            "model_breakdown": [
+                {"model": "gpt-5.4", "cost": 2.1, "tokens": 70000, "tool_calls": 3},
+                {"model": "gpt-5.1", "cost": 0.3, "tokens": 30000, "tool_calls": 6},
+            ],
+            "session_rankings": [
+                {"failure_rate_pct": 15.0, "continuation_loops": 2, "max_tokens_stops": 0}
+            ],
+            "sessions": [
+                {"prompt_groups": [{"tool_call_count": 0, "input_tokens": 2500}]},
+                {"prompt_groups": [{"tool_call_count": 0, "input_tokens": 1800}]},
+            ],
+        }
+
+        cards = (
+            build_project_overview_insights(aggregate)
+            + build_project_cost_insights(aggregate)
+            + build_project_prompt_insights(aggregate)
+        )
+        self.assertTrue(cards)
+        self.assertTrue(all(card["evidence"].startswith("Evidence:") for card in cards))
+        self.assertTrue(any(card.get("recommendation") for card in cards))
 
     def test_guided_overview_contains_navigation_to_all_pages(self) -> None:
         from harness_observability_layer.reporting.guided_site import (
@@ -400,6 +465,190 @@ class GuidedReportingTests(unittest.TestCase):
         self.assertNotIn('"nav.cost":"Cost &amp; Efficiency"', html)
         self.assertIn("--bg: #0b0f14;", css)
         self.assertIn("[data-theme=\"light\"]", css)
+
+    def test_project_aggregate_groups_prompt_and_turn_rankings(self) -> None:
+        from harness_observability_layer.reporting.project_aggregate import (
+            build_project_aggregate,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            raw_session = tmp_path / "rollout-project.jsonl"
+            raw_session.write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "type": "session_meta",
+                                "timestamp": "2026-04-20T00:00:00Z",
+                                "payload": {
+                                    "id": "sess_project",
+                                    "cwd": str(tmp_path),
+                                    "source": "codex",
+                                },
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "type": "turn_context",
+                                "timestamp": "2026-04-20T00:00:00Z",
+                                "payload": {"model": "gpt-5.4"},
+                            }
+                        ),
+                        json.dumps({"type": "turn.started", "timestamp": "2026-04-20T00:00:01Z"}),
+                        json.dumps(
+                            {
+                                "type": "event_msg",
+                                "timestamp": "2026-04-20T00:00:02Z",
+                                "payload": {"type": "user_message", "message": "primeiro prompt"},
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "type": "event_msg",
+                                "timestamp": "2026-04-20T00:00:03Z",
+                                "payload": {
+                                    "type": "token_count",
+                                    "info": {
+                                        "total_token_usage": {
+                                            "input_tokens": 1000,
+                                            "output_tokens": 120,
+                                            "cached_input_tokens": 0,
+                                        }
+                                    },
+                                },
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "type": "turn.completed",
+                                "timestamp": "2026-04-20T00:00:04Z",
+                                "usage": {
+                                    "input_tokens": 1000,
+                                    "output_tokens": 120,
+                                    "cached_input_tokens": 0,
+                                },
+                            }
+                        ),
+                        json.dumps({"type": "turn.started", "timestamp": "2026-04-20T00:00:05Z"}),
+                        json.dumps(
+                            {
+                                "type": "event_msg",
+                                "timestamp": "2026-04-20T00:00:06Z",
+                                "payload": {"type": "user_message", "message": "segundo prompt"},
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "type": "event_msg",
+                                "timestamp": "2026-04-20T00:00:07Z",
+                                "payload": {
+                                    "type": "token_count",
+                                    "info": {
+                                        "total_token_usage": {
+                                            "input_tokens": 5000,
+                                            "output_tokens": 620,
+                                            "cached_input_tokens": 0,
+                                        }
+                                    },
+                                },
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "type": "turn.completed",
+                                "timestamp": "2026-04-20T00:00:08Z",
+                                "usage": {
+                                    "input_tokens": 5000,
+                                    "output_tokens": 620,
+                                    "cached_input_tokens": 0,
+                                },
+                            }
+                        ),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            session_dir = tmp_path / "hol-artifacts" / "sessions" / "rollout-project"
+            import_codex_session_to_dir(
+                input_path=raw_session,
+                output_dir=session_dir,
+                project_root=tmp_path,
+                resolve_file_stats=False,
+            )
+            aggregate = build_project_aggregate(tmp_path)
+            self.assertEqual(aggregate["totals"]["sessions"], 1)
+            self.assertGreaterEqual(len(aggregate["top_prompt_groups"]), 2)
+            self.assertGreaterEqual(len(aggregate["top_turns"]), 2)
+            self.assertEqual(
+                aggregate["top_prompt_groups"][0]["prompt_excerpt"], "segundo prompt"
+            )
+
+    def test_project_dashboard_renders_rankings_and_insights(self) -> None:
+        from harness_observability_layer.reporting.project_dashboard import (
+            build_project_dashboard_html,
+        )
+
+        html = build_project_dashboard_html(
+            {
+                "totals": {
+                    "sessions": 2,
+                    "prompt_groups": 4,
+                    "turns": 4,
+                    "total_tokens": 42000,
+                    "estimated_cost_usd": 1.2,
+                    "total_cache_read_tokens": 12000,
+                },
+                "date_range": {"from": "2026-04-19", "to": "2026-04-20"},
+                "trends": {"daily": [{"date": "2026-04-20", "cost": 1.2, "tokens": 42000}]},
+                "model_breakdown": [{"model": "gpt-5.4", "cost": 1.2, "tokens": 42000}],
+                "top_prompt_groups": [
+                    {
+                        "session_name": "rollout-a",
+                        "prompt_excerpt": "prompt caro",
+                        "driver_name": "unattributed",
+                        "model": "gpt-5.4",
+                        "total_tokens": 24000,
+                        "estimated_cost_usd": 0.7,
+                        "tool_call_count": 3,
+                        "ordinal": 2,
+                    }
+                ],
+                "top_turns": [
+                    {
+                        "session_name": "rollout-a",
+                        "prompt_excerpt": "turn spike",
+                        "driver_name": "unattributed",
+                        "model": "gpt-5.4",
+                        "total_tokens": 18000,
+                        "estimated_cost_usd": 0.6,
+                        "tool_call_count": 2,
+                        "ordinal": 5,
+                    }
+                ],
+                "session_rankings": [
+                    {
+                        "display_title": "Sessao A",
+                        "display_subtitle": "lab · 2026-04-20",
+                        "source_name": "Codex",
+                        "estimated_cost_usd": 0.7,
+                        "total_tokens": 24000,
+                        "failure_rate_pct": 0,
+                        "continuation_loops": 1,
+                        "max_tokens_stops": 0,
+                        "guided_report_relpath": "./../sessions/rollout-a/index.html",
+                    }
+                ],
+                "sessions": [],
+            }
+        )
+        self.assertIn("Project Dashboard", html)
+        self.assertIn("Most Expensive Prompt Groups", html)
+        self.assertIn("Most Expensive Turns", html)
+        self.assertIn("Sessions Requiring Attention", html)
+        self.assertIn("Inspect</a>", html)
 
 
 if __name__ == "__main__":

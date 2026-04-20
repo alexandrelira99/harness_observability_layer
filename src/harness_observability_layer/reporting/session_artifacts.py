@@ -16,6 +16,8 @@ from harness_observability_layer.observer.logger import JsonlEventLogger
 
 from .html_report import build_session_report_html, report_css
 from .guided_site import build_guided_session_site, report_css as guided_report_css
+from .project_aggregate import build_project_aggregate
+from .project_dashboard import build_project_dashboard_html
 from .session_index import build_sessions_index_html
 from .session_metadata import derive_session_metadata
 
@@ -75,6 +77,10 @@ def refresh_sessions_index(project_root: str | Path) -> Path:
     """Rebuild the sessions index HTML from existing imported sessions."""
     dirs = ensure_project_artifact_dirs(project_root)
     sessions_root = dirs["sessions_root"]
+    project_artifacts_root = dirs["artifacts_root"] / "project"
+    project_page_root = dirs["artifacts_root"] / "page" / "project"
+    project_artifacts_root.mkdir(parents=True, exist_ok=True)
+    project_page_root.mkdir(parents=True, exist_ok=True)
     entries = []
     source_roots = [sessions_root]
     legacy_sessions_root = dirs["legacy_sessions_root"]
@@ -135,6 +141,29 @@ def refresh_sessions_index(project_root: str | Path) -> Path:
     index_css_path = sessions_root / "report.css"
     index_css_path.write_text(guided_report_css(), encoding="utf-8")
     index_html_path.write_text(build_sessions_index_html(entries), encoding="utf-8")
+    project_aggregate = build_project_aggregate(project_root)
+    (project_artifacts_root / "summary.json").write_text(
+        json.dumps(project_aggregate, indent=2), encoding="utf-8"
+    )
+    (project_page_root / "index.html").write_text(
+        build_project_dashboard_html(project_aggregate), encoding="utf-8"
+    )
+    (dirs["artifacts_root"] / "index.html").write_text(
+        """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="refresh" content="0; url=./page/project/index.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>HOL Project Dashboard</title>
+</head>
+<body>
+  <p>Redirecting to the project dashboard...</p>
+</body>
+</html>
+""",
+        encoding="utf-8",
+    )
     return index_html_path
 
 
