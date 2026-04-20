@@ -173,6 +173,51 @@ class ReleaseSurfaceTests(unittest.TestCase):
             self.assertIn("top_prompt_groups", parsed)
             self.assertFalse((project_root / "hol-artifacts").exists())
 
+    def test_live_dashboard_data_ignores_sessions_without_explicit_project_cwd(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            project_root = tmp_path / "project"
+            other_root = tmp_path / "other-project"
+            codex_root = tmp_path / "codex-archive"
+            project_root.mkdir()
+            other_root.mkdir()
+            codex_root.mkdir()
+
+            self._write_codex_session(
+                codex_root, other_root, "rollout-other", "hello from other project"
+            )
+            (codex_root / "rollout-missing-cwd.jsonl").write_text(
+                json.dumps(
+                    {
+                        "type": "session_meta",
+                        "timestamp": "2026-04-20T00:00:00Z",
+                        "payload": {"id": "rollout-missing-cwd", "source": "codex"},
+                    }
+                )
+                + "\n"
+                + json.dumps(
+                    {
+                        "type": "event_msg",
+                        "timestamp": "2026-04-20T00:00:01Z",
+                        "payload": {
+                            "type": "user_message",
+                            "message": "session without cwd should not leak into live dashboard",
+                        },
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch.dict(
+                os.environ,
+                {"HOL_CODEX_ARCHIVED_DIR": str(codex_root)},
+                clear=False,
+            ):
+                aggregate = load_live_dashboard_data(project_root)
+
+            self.assertEqual(aggregate["totals"]["sessions"], 0)
+
     def test_server_exposes_html_and_json_endpoints(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -229,4 +274,3 @@ class ReleaseSurfaceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

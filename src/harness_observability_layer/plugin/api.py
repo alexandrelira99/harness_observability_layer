@@ -157,6 +157,16 @@ def _archive_candidate_matches_project(session_path: Path, project_root: Path, s
     return session_cwd == project_root or project_root in session_cwd.parents
 
 
+def _archive_candidate_strictly_matches_project(
+    session_path: Path, project_root: Path, source: str
+) -> bool:
+    """Return True only when a session explicitly records the current project cwd."""
+    session_cwd = _extract_archived_session_cwd(session_path, source)
+    if session_cwd is None:
+        return False
+    return session_cwd == project_root or project_root in session_cwd.parents
+
+
 def _default_archive_candidates(source: str) -> List[Path]:
     xdg_data_home = os.environ.get("XDG_DATA_HOME")
     candidates: List[Path] = []
@@ -269,7 +279,9 @@ def load_live_dashboard_data(
         candidates = [
             path
             for path in _archive_candidates(archive_root, source)
-            if _archive_candidate_matches_project(path, project_root_path, source)
+            if _archive_candidate_strictly_matches_project(
+                path, project_root_path, source
+            )
         ]
         for session_path in candidates:
             events = _normalize_source_session(session_path, source)
