@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.2 - 2026-04-20
+
+- made generic `hol import all` and `hol import latest` fall back to Claude Code when Codex is unavailable for the current project
+- fixed Claude Code import crashes when `toolUseResult` is emitted as a string instead of an object
+
 ## 1.0.1 - 2026-04-20
 
 - made archived-session import path resolution safer and more portable across machines

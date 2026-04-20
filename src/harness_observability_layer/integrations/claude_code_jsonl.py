@@ -510,7 +510,12 @@ def normalize_claude_code_records(records: Iterable[Dict[str, Any]]) -> List[Eve
                                 )
                             )
                     elif tool_name == "Bash":
-                        exit_code = raw.get("toolUseResult", {}).get("exitCode")
+                        raw_tool_result = raw.get("toolUseResult")
+                        exit_code = (
+                            raw_tool_result.get("exitCode")
+                            if isinstance(raw_tool_result, dict)
+                            else None
+                        )
                         if exit_code not in (None, 0):
                             normalized.append(
                                 Event(

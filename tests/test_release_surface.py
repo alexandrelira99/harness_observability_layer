@@ -491,6 +491,74 @@ class ReleaseSurfaceTests(unittest.TestCase):
             self.assertIn('"imported_sessions": [', output)
             self.assertIn('"rollout-cli"', output)
 
+    def test_cli_import_all_falls_back_to_claude_when_codex_is_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            project_root = tmp_path / "project"
+            claude_root = tmp_path / "claude-projects"
+            claude_project_dir = claude_root / "project"
+            project_root.mkdir()
+            claude_project_dir.mkdir(parents=True)
+
+            (claude_project_dir / "session.jsonl").write_text(
+                json.dumps(
+                    {
+                        "sessionId": "claude-only",
+                        "cwd": str(project_root),
+                        "timestamp": "2026-04-20T00:00:00Z",
+                        "type": "user",
+                        "message": {"content": [{"type": "text", "text": "hello from claude"}]},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch.dict(
+                os.environ,
+                {"HOL_CLAUDE_ARCHIVED_DIR": str(claude_root)},
+                clear=False,
+            ):
+                output = self._run_cli(["import", "all", "--no-resolve-files"], cwd=project_root)
+
+            self.assertIn('"source": "claude"', output)
+            self.assertIn('"claude-session"', output)
+
+    def test_cli_import_latest_falls_back_to_claude_when_codex_is_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            project_root = tmp_path / "project"
+            claude_root = tmp_path / "claude-projects"
+            claude_project_dir = claude_root / "project"
+            project_root.mkdir()
+            claude_project_dir.mkdir(parents=True)
+
+            session_path = claude_project_dir / "latest-session.jsonl"
+            session_path.write_text(
+                json.dumps(
+                    {
+                        "sessionId": "claude-latest",
+                        "cwd": str(project_root),
+                        "timestamp": "2026-04-20T00:00:00Z",
+                        "type": "user",
+                        "message": {"content": [{"type": "text", "text": "hello from claude latest"}]},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            os.utime(session_path, (10, 10))
+
+            with mock.patch.dict(
+                os.environ,
+                {"HOL_CLAUDE_ARCHIVED_DIR": str(claude_root)},
+                clear=False,
+            ):
+                output = self._run_cli(["import", "latest", "--no-resolve-files"], cwd=project_root)
+
+            self.assertIn('"source": "claude"', output)
+            self.assertIn('"session_id": "claude-latest-session"', output)
+
     def test_claude_imports_only_current_project_sessions_or_missing_cwd(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

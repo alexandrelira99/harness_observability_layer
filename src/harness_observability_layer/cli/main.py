@@ -21,6 +21,96 @@ from harness_observability_layer.plugin.api import (
 )
 
 
+def _run_import_latest_auto(
+    *,
+    archived_dir: str | None,
+    reimport: bool,
+    project_root: Path,
+    copy_raw: bool,
+    resolve_file_stats: bool,
+) -> Any:
+    if archived_dir is not None:
+        return import_latest_session(
+            archived_dir,
+            reimport=reimport,
+            project_root=project_root,
+            copy_raw=copy_raw,
+            resolve_file_stats=resolve_file_stats,
+        )
+
+    codex_error: FileNotFoundError | None = None
+    try:
+        return import_latest_session(
+            None,
+            reimport=reimport,
+            project_root=project_root,
+            copy_raw=copy_raw,
+            resolve_file_stats=resolve_file_stats,
+        )
+    except FileNotFoundError as error:
+        codex_error = error
+
+    try:
+        return import_latest_session(
+            None,
+            reimport=reimport,
+            project_root=project_root,
+            source="claude",
+            copy_raw=copy_raw,
+            resolve_file_stats=resolve_file_stats,
+        )
+    except FileNotFoundError:
+        if codex_error is not None:
+            raise codex_error
+        raise
+
+
+def _run_import_all_auto(
+    *,
+    archived_dir: str | None,
+    reimport: bool,
+    project_root: Path,
+    copy_raw: bool,
+    resolve_file_stats: bool,
+) -> Any:
+    if archived_dir is not None:
+        return import_all_sessions(
+            archived_dir,
+            reimport=reimport,
+            project_root=project_root,
+            copy_raw=copy_raw,
+            resolve_file_stats=resolve_file_stats,
+        )
+
+    codex_error: FileNotFoundError | None = None
+    try:
+        codex_result = import_all_sessions(
+            None,
+            reimport=reimport,
+            project_root=project_root,
+            copy_raw=copy_raw,
+            resolve_file_stats=resolve_file_stats,
+        )
+        if codex_result["imported_count"] > 0 or codex_result["skipped_count"] > 0:
+            return codex_result
+    except FileNotFoundError as error:
+        codex_error = error
+
+    try:
+        return import_all_sessions(
+            None,
+            reimport=reimport,
+            project_root=project_root,
+            source="claude",
+            copy_raw=copy_raw,
+            resolve_file_stats=resolve_file_stats,
+        )
+    except FileNotFoundError:
+        if codex_error is not None:
+            raise codex_error
+        raise
+
+
 def _print(result: Any, format: str | None = None) -> None:
     if isinstance(result, (dict, list)):
         print(json.dumps(result, indent=2))
@@ -151,8 +241,8 @@ def main() -> None:
             return
         if args.import_command == "latest":
             _print(
-                import_latest_session(
-                    args.archived_dir,
+                _run_import_latest_auto(
+                    archived_dir=args.archived_dir,
                     reimport=args.reimport,
                     project_root=project_root,
                     copy_raw=not args.no_raw_copy,
@@ -162,8 +252,8 @@ def main() -> None:
             return
         if args.import_command == "all":
             _print(
-                import_all_sessions(
-                    args.archived_dir,
+                _run_import_all_auto(
+                    archived_dir=args.archived_dir,
                     reimport=args.reimport,
                     project_root=project_root,
                     copy_raw=not args.no_raw_copy,

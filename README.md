@@ -146,6 +146,8 @@ hol import session ~/.codex/archived_sessions/rollout-YYYY-MM-DDTHH-MM-SS-....js
 hol import latest
 ```
 
+Without `--archived-dir`, the generic `hol import latest` first tries Codex and automatically falls back to Claude Code when no eligible Codex session is available for the current project.
+
 By default, HOL resolves the archive directory in this order:
 
 1. `--archived-dir`
@@ -161,6 +163,8 @@ If no valid archive directory is found, the command fails with a clear configura
 ```bash
 hol import all
 ```
+
+Without `--archived-dir`, the generic `hol import all` first tries Codex and automatically falls back to Claude Code when no eligible Codex sessions are available for the current project.
 
 By default, existing imported session folders are skipped.
 To force reimport:

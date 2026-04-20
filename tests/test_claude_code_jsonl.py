@@ -83,6 +83,45 @@ class ClaudeCodeJsonlNormalizationTests(unittest.TestCase):
         self.assertEqual(file_search_events[0]["payload"]["query"], "fullchain.pem")
         self.assertEqual(file_search_events[0]["payload"]["path"], "backend/ops")
 
+    def test_bash_tool_result_string_does_not_crash_normalization(self) -> None:
+        records = [
+            {
+                "type": "assistant",
+                "timestamp": "2026-04-20T00:00:00Z",
+                "sessionId": "claude-bash-string",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_123",
+                            "name": "Bash",
+                            "input": {"command": "pwd"},
+                        }
+                    ],
+                },
+            },
+            {
+                "type": "user",
+                "timestamp": "2026-04-20T00:00:01Z",
+                "sessionId": "claude-bash-string",
+                "toolUseID": "toolu_123",
+                "toolUseResult": "Command completed successfully",
+                "message": {
+                    "role": "user",
+                    "content": [{"type": "tool_result", "tool_use_id": "toolu_123", "content": "ok"}],
+                },
+            },
+        ]
+
+        events = [event.to_dict() for event in normalize_claude_code_records(records)]
+
+        tool_starts = [event for event in events if event["event_type"] == "tool_call_started"]
+        tool_failures = [event for event in events if event["event_type"] == "tool_call_failed"]
+        self.assertEqual(len(tool_starts), 1)
+        self.assertEqual(tool_starts[0]["payload"]["tool_name"], "Bash")
+        self.assertEqual(tool_failures, [])
+
 
 if __name__ == "__main__":
     unittest.main()
