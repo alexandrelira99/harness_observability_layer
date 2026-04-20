@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
@@ -19,6 +20,12 @@ from harness_observability_layer.reporting import (
 from harness_observability_layer.reporting.markdown_report import build_portfolio_markdown, build_session_markdown
 from harness_observability_layer.reporting.session_metadata import derive_session_metadata
 from harness_observability_layer.security import redact_events, redact_metadata, redact_summary, sanitize_session_id
+
+
+_ARCHIVE_ENV_VARS: dict[str, tuple[str, ...]] = {
+    "codex": ("HOL_CODEX_ARCHIVED_DIR", "CODEX_ARCHIVED_SESSIONS_DIR"),
+    "claude": ("HOL_CLAUDE_ARCHIVED_DIR", "CLAUDE_ARCHIVED_SESSIONS_DIR"),
+}
 
 
 def _paths(project_root: str | Path) -> Dict[str, Path]:
@@ -142,6 +149,82 @@ def _archive_candidate_matches_project(session_path: Path, project_root: Path, s
     return session_cwd == project_root or project_root in session_cwd.parents
 
 
+def _default_archive_candidates(source: str) -> List[Path]:
+    xdg_data_home = os.environ.get("XDG_DATA_HOME")
+    candidates: List[Path] = []
+    if source == "codex":
+        if xdg_data_home:
+            candidates.append(Path(xdg_data_home) / "codex" / "archived_sessions")
+        candidates.extend(
+            [
+                Path("~/.config/codex/archived_sessions").expanduser(),
+                Path("~/.codex/archived_sessions").expanduser(),
+            ]
+        )
+        return candidates
+    if source == "claude":
+        if xdg_data_home:
+            candidates.append(Path(xdg_data_home) / "claude" / "projects")
+        candidates.extend(
+            [
+                Path("~/.config/claude/projects").expanduser(),
+                Path("~/.claude/projects").expanduser(),
+            ]
+        )
+        return candidates
+    raise ValueError(f"Unsupported source: {source}")
+
+
+def _resolve_archive_root(
+    archived_dir: str | None,
+    *,
+    source: str,
+) -> Path:
+    if source not in _ARCHIVE_ENV_VARS:
+        raise ValueError(f"Unsupported source: {source}")
+
+    if archived_dir:
+        explicit_root = Path(archived_dir).expanduser().resolve()
+        if explicit_root.is_dir():
+            return explicit_root
+        raise FileNotFoundError(
+            f"Configured archived {source} session directory does not exist or is not a directory: {explicit_root}. "
+            f"Pass a valid path with --archived-dir or update one of: {', '.join(_ARCHIVE_ENV_VARS[source])}."
+        )
+
+    attempted: List[tuple[str, Path]] = []
+    seen_paths: set[Path] = set()
+
+    for env_var in _ARCHIVE_ENV_VARS[source]:
+        raw_value = os.environ.get(env_var)
+        if not raw_value:
+            continue
+        candidate = Path(raw_value).expanduser().resolve()
+        if candidate in seen_paths:
+            continue
+        seen_paths.add(candidate)
+        attempted.append((f"env:{env_var}", candidate))
+        if candidate.is_dir():
+            return candidate
+
+    for candidate in _default_archive_candidates(source):
+        resolved = candidate.expanduser().resolve()
+        if resolved in seen_paths:
+            continue
+        seen_paths.add(resolved)
+        attempted.append(("auto-discovery", resolved))
+        if resolved.is_dir():
+            return resolved
+
+    attempted_lines = "\n".join(f"- {label}: {path}" for label, path in attempted)
+    env_vars = ", ".join(_ARCHIVE_ENV_VARS[source])
+    raise FileNotFoundError(
+        f"No archived {source} session directory could be resolved.\n"
+        f"Tried:\n{attempted_lines}\n"
+        f"Configure one with --archived-dir <path> or set one of: {env_vars}."
+    )
+
+
 def format_result(data: Any, format: str) -> str | Dict[str, Any] | List[Dict[str, Any]]:
     """Format plugin results for CLI or tool responses."""
     if format == "json":
@@ -200,7 +283,7 @@ def import_session(
 
 
 def import_latest_session(
-    archived_dir: str = "~/.codex/archived_sessions",
+    archived_dir: str | None = None,
     reimport: bool = False,
     project_root: str | Path = ".",
     *,
@@ -209,7 +292,7 @@ def import_latest_session(
     resolve_file_stats: bool = True,
 ) -> Dict[str, Any]:
     """Import the most recent archived session for the given source."""
-    archive_root = Path(archived_dir).expanduser().resolve()
+    archive_root = _resolve_archive_root(archived_dir, source=source)
     project_root_path = Path(project_root).resolve()
     candidates = sorted(
         (
@@ -239,7 +322,7 @@ def import_latest_session(
 
 
 def import_all_sessions(
-    archived_dir: str = "~/.codex/archived_sessions",
+    archived_dir: str | None = None,
     reimport: bool = False,
     project_root: str | Path = ".",
     *,
@@ -248,7 +331,7 @@ def import_all_sessions(
     resolve_file_stats: bool = True,
 ) -> Dict[str, Any]:
     """Import all archived sessions for the given source."""
-    archive_root = Path(archived_dir).expanduser().resolve()
+    archive_root = _resolve_archive_root(archived_dir, source=source)
     project_root_path = Path(project_root).resolve()
     candidates = [
         path

@@ -45,13 +45,13 @@ def build_parser() -> argparse.ArgumentParser:
     import_session_parser.add_argument("--no-resolve-files", action="store_true")
 
     import_latest_parser = import_sub.add_parser("latest", help="Import the latest archived Codex session")
-    import_latest_parser.add_argument("--archived-dir", default="~/.codex/archived_sessions")
+    import_latest_parser.add_argument("--archived-dir", default=None)
     import_latest_parser.add_argument("--reimport", action="store_true")
     import_latest_parser.add_argument("--no-raw-copy", action="store_true")
     import_latest_parser.add_argument("--no-resolve-files", action="store_true")
 
     import_all_parser = import_sub.add_parser("all", help="Import all archived Codex sessions")
-    import_all_parser.add_argument("--archived-dir", default="~/.codex/archived_sessions")
+    import_all_parser.add_argument("--archived-dir", default=None)
     import_all_parser.add_argument("--reimport", action="store_true")
     import_all_parser.add_argument("--no-raw-copy", action="store_true")
     import_all_parser.add_argument("--no-resolve-files", action="store_true")
@@ -63,13 +63,13 @@ def build_parser() -> argparse.ArgumentParser:
     import_claude_session_parser.add_argument("--no-resolve-files", action="store_true")
 
     import_claude_latest_parser = import_sub.add_parser("claude-latest", help="Import the latest archived Claude Code session")
-    import_claude_latest_parser.add_argument("--archived-dir", default="~/.claude/projects")
+    import_claude_latest_parser.add_argument("--archived-dir", default=None)
     import_claude_latest_parser.add_argument("--reimport", action="store_true")
     import_claude_latest_parser.add_argument("--no-raw-copy", action="store_true")
     import_claude_latest_parser.add_argument("--no-resolve-files", action="store_true")
 
     import_claude_all_parser = import_sub.add_parser("claude-all", help="Import all archived Claude Code sessions")
-    import_claude_all_parser.add_argument("--archived-dir", default="~/.claude/projects")
+    import_claude_all_parser.add_argument("--archived-dir", default=None)
     import_claude_all_parser.add_argument("--reimport", action="store_true")
     import_claude_all_parser.add_argument("--no-raw-copy", action="store_true")
     import_claude_all_parser.add_argument("--no-resolve-files", action="store_true")

@@ -13,7 +13,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Import all archived Codex sessions.")
     parser.add_argument(
         "--archived-dir",
-        default="~/.codex/archived_sessions",
+        default=None,
         help="Directory containing archived Codex rollout JSONL files.",
     )
     parser.add_argument(
