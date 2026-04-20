@@ -10,11 +10,15 @@ import sys
 from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import unquote
 from typing import Any, Dict
 
 from harness_observability_layer.plugin.api import load_live_dashboard_data
 from harness_observability_layer.reporting.project_dashboard import (
     build_project_dashboard_html,
+)
+from harness_observability_layer.reporting.session_dashboard import (
+    build_session_dashboard_html,
 )
 
 
@@ -101,8 +105,22 @@ def create_server(
         def do_GET(self) -> None:  # noqa: N802
             if self.path in {"/", "/index.html"}:
                 aggregate = cache.load()
+                self._send_html(build_project_dashboard_html(aggregate, live_mode=True))
+                return
+
+            if self.path.startswith("/session/"):
+                session_name = unquote(self.path[len("/session/") :])
+                aggregate = cache.load()
+                sessions = aggregate.get("sessions") or []
+                session_data = next(
+                    (s for s in sessions if s.get("session_name") == session_name),
+                    None,
+                )
+                if session_data is None:
+                    self.send_error(HTTPStatus.NOT_FOUND, "Session not found")
+                    return
                 self._send_html(
-                    build_project_dashboard_html(aggregate, live_mode=True)
+                    build_session_dashboard_html(session_name, session_data)
                 )
                 return
 

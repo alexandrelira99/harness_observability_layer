@@ -380,6 +380,36 @@ def compute_metrics(
             "removed_lines": file_edit_stats[path]["removed_lines"],
         }
 
+    for path in distinct_files_edited:
+        if path in file_summary:
+            continue
+        total_lines = None
+        total_lines_status = "unresolved"
+        file_path = Path(path)
+        if resolve_file_stats:
+            try:
+                if file_path.exists() and file_path.is_file():
+                    total_lines = len(
+                        file_path.read_text(encoding="utf-8").splitlines()
+                    )
+                    total_lines_status = "resolved"
+            except (OSError, UnicodeDecodeError):
+                total_lines = None
+                total_lines_status = "unresolved"
+        else:
+            total_lines_status = "disabled"
+        file_summary[path] = {
+            "merged_read_spans": [],
+            "union_lines_read": 0,
+            "total_lines": total_lines,
+            "total_lines_status": total_lines_status,
+            "read_coverage_pct": None,
+            "edited": True,
+            "edit_count": file_edit_stats[path]["edit_count"],
+            "added_lines": file_edit_stats[path]["added_lines"],
+            "removed_lines": file_edit_stats[path]["removed_lines"],
+        }
+
     edited_without_prior_read = sorted(
         path for path in distinct_files_edited if path not in distinct_files_read
     )

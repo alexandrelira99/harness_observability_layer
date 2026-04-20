@@ -10,6 +10,7 @@ from .guided_insights import (
     build_project_cost_insights,
     build_project_overview_insights,
     build_project_prompt_insights,
+    build_project_executive_summary,
 )
 
 
@@ -109,7 +110,7 @@ def _top_rows(
         rows.append(
             f"""
             <article class="rank-card">
-              <div class="rank-card-index">{int(item.get('ordinal', 0) or 0)}</div>
+              <div class="rank-card-index">{int(item.get("ordinal", 0) or 0)}</div>
               <div class="rank-card-main">
                 <div class="rank-card-title" title="{prompt_title}">{escape(prompt)}</div>
                 <div class="rank-card-subtitle" title="{session_title}">{escape(session_name)}</div>
@@ -118,15 +119,15 @@ def _top_rows(
                 <span class="model-badge {_model_class(model)}"><span class="model-dot"></span>{escape(model)}</span>
                 <div class="rank-metric">
                   <span class="rank-metric-label">Tokens</span>
-                  <span class="rank-metric-value">{_format_tokens(item.get('total_tokens'))}</span>
+                  <span class="rank-metric-value">{_format_tokens(item.get("total_tokens"))}</span>
                 </div>
                 <div class="rank-metric">
                   <span class="rank-metric-label">Cost</span>
-                  <span class="rank-metric-value">{_format_cost(item.get('estimated_cost_usd'))}</span>
+                  <span class="rank-metric-value">{_format_cost(item.get("estimated_cost_usd"))}</span>
                 </div>
                 <div class="rank-metric">
                   <span class="rank-metric-label">Tools</span>
-                  <span class="rank-metric-value">{_format_int(item.get('tool_call_count'))}</span>
+                  <span class="rank-metric-value">{_format_int(item.get("tool_call_count"))}</span>
                 </div>
               </div>
               {action_markup}
@@ -138,39 +139,50 @@ def _top_rows(
     return f'<div class="empty-state">No ranked {escape(heading_kind)} data yet.</div>'
 
 
-def _session_rows(items: List[Dict[str, Any]], *, show_actions: bool = True) -> str:
+def _session_rows(
+    items: List[Dict[str, Any]], *, live_mode: bool = False, show_actions: bool = True
+) -> str:
     rows = []
     for item in items[:8]:
-        action_href = escape(str(item.get("guided_report_relpath") or ""), quote=True)
+        if live_mode:
+            action_href = (
+                f"/session/{escape(str(item.get('session_name') or ''), quote=True)}"
+            )
+            action_label = "Details"
+        else:
+            action_href = escape(
+                str(item.get("guided_report_relpath") or ""), quote=True
+            )
+            action_label = "Inspect"
         action_markup = (
-            f'<div class="rank-card-action"><a class="table-link action-link" href="{action_href}">Inspect</a></div>'
-            if action_href and show_actions
+            f'<div class="rank-card-action"><a class="table-link action-link" href="{action_href}">{action_label}</a></div>'
+            if (action_href and show_actions) or live_mode
             else ""
         )
         rows.append(
             f"""
             <article class="session-card">
               <div class="session-card-main">
-                <div class="rank-card-title" title="{escape(str(item.get('display_title') or item.get('session_name') or 'Session'), quote=True)}">{escape(str(item.get('display_title') or item.get('session_name') or 'Session'))}</div>
-                <div class="rank-card-subtitle" title="{escape(str(item.get('display_subtitle') or item.get('session_name') or ''), quote=True)}">{escape(str(item.get('display_subtitle') or item.get('session_name') or ''))}</div>
+                <div class="rank-card-title" title="{escape(str(item.get("display_title") or item.get("session_name") or "Session"), quote=True)}">{escape(str(item.get("display_title") or item.get("session_name") or "Session"))}</div>
+                <div class="rank-card-subtitle" title="{escape(str(item.get("display_subtitle") or item.get("session_name") or ""), quote=True)}">{escape(str(item.get("display_subtitle") or item.get("session_name") or ""))}</div>
               </div>
               <div class="rank-card-meta">
-                <span class="model-badge model-unknown"><span class="model-dot"></span>{escape(str(item.get('source_name') or 'Imported'))}</span>
+                <span class="model-badge model-unknown"><span class="model-dot"></span>{escape(str(item.get("source_name") or "Imported"))}</span>
                 <div class="rank-metric">
                   <span class="rank-metric-label">Cost</span>
-                  <span class="rank-metric-value">{_format_cost(item.get('estimated_cost_usd'))}</span>
+                  <span class="rank-metric-value">{_format_cost(item.get("estimated_cost_usd"))}</span>
                 </div>
                 <div class="rank-metric">
                   <span class="rank-metric-label">Tokens</span>
-                  <span class="rank-metric-value">{_format_tokens(item.get('total_tokens'))}</span>
+                  <span class="rank-metric-value">{_format_tokens(item.get("total_tokens"))}</span>
                 </div>
                 <div class="rank-metric">
                   <span class="rank-metric-label">Failures</span>
-                  <span class="rank-metric-value">{_format_pct(item.get('failure_rate_pct'))}</span>
+                  <span class="rank-metric-value">{_format_pct(item.get("failure_rate_pct"))}</span>
                 </div>
                 <div class="rank-metric">
                   <span class="rank-metric-label">Loops / Stops</span>
-                  <span class="rank-metric-value">{int(item.get('continuation_loops', 0) or 0)} / {int(item.get('max_tokens_stops', 0) or 0)}</span>
+                  <span class="rank-metric-value">{int(item.get("continuation_loops", 0) or 0)} / {int(item.get("max_tokens_stops", 0) or 0)}</span>
                 </div>
               </div>
               {action_markup}
@@ -229,6 +241,8 @@ def build_project_dashboard_html(
           <a href="../../project/summary.json">Project Aggregate JSON</a>
         """
     )
+
+    executive_summary = build_project_executive_summary(aggregate)
 
     return f"""<!DOCTYPE html>
 <html lang="en" data-theme="dark">
@@ -461,6 +475,11 @@ def build_project_dashboard_html(
     .project-insight-recommendation {{
       margin-bottom: 0 !important;
     }}
+    .executive-summary {{
+      font-size: 1.05rem;
+      line-height: 1.55;
+      color: var(--text-strong);
+    }}
     .trend-list {{
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -666,8 +685,8 @@ def build_project_dashboard_html(
       <div class="project-hero-card">
         <p class="eyebrow">Harness Observability Layer</p>
         <h1>Project Dashboard</h1>
-        <p class="hero-text">
-          Zero-friction view of aggregate spend, ranked prompt and turn costs, and prescriptive actions for context pressure, model choice, and startup overhead.
+        <p class="hero-text executive-summary">
+          {escape(executive_summary)}
         </p>
         <div class="project-nav">
           {primary_nav}
@@ -675,9 +694,9 @@ def build_project_dashboard_html(
       </div>
       <div class="project-hero-card">
         <div class="artifact-label">Coverage</div>
-        <code>{escape(str(date_range.get('from') or 'n/a'))} → {escape(str(date_range.get('to') or 'n/a'))}</code>
+        <code>{escape(str(date_range.get("from") or "n/a"))} → {escape(str(date_range.get("to") or "n/a"))}</code>
         <p class="hero-text" style="margin-top:12px;">
-          {int(totals.get('sessions', 0) or 0)} imported sessions, {int(totals.get('prompt_groups', 0) or 0)} prompt groups, {int(totals.get('turns', 0) or 0)} turns.
+          {int(totals.get("sessions", 0) or 0)} imported sessions, {int(totals.get("prompt_groups", 0) or 0)} prompt groups, {int(totals.get("turns", 0) or 0)} turns.
         </p>
       </div>
     </section>
@@ -687,6 +706,16 @@ def build_project_dashboard_html(
       {_kpi("Total Tokens", _format_tokens(totals.get("total_tokens")), f"{_format_tokens(totals.get('total_cache_read_tokens'))} cache-read")}
       {_kpi("Prompt Groups", _format_int(totals.get("prompt_groups")), "Grouped by user prompt plus continuations")}
       {_kpi("Turns", _format_int(totals.get("turns")), "Ranked for /clear and long-context analysis")}
+    </section>
+
+    <section class="project-section">
+      <h2>Sessions Requiring Attention</h2>
+      <p class="project-section-copy">
+        Ordered by attention score so cost, failure pressure, continuation loops, and max-token stops surface quickly.
+      </p>
+      <div class="session-list">
+        {_session_rows(session_rankings, live_mode=live_mode, show_actions=not live_mode)}
+      </div>
     </section>
 
     <section class="project-section">
@@ -733,16 +762,6 @@ def build_project_dashboard_html(
           {_top_rows(top_turns, heading_kind="turn", show_actions=not live_mode)}
         </div>
       </section>
-    </section>
-
-    <section class="project-section">
-      <h2>Sessions Requiring Attention</h2>
-      <p class="project-section-copy">
-        Ordered by attention score so cost, failure pressure, continuation loops, and max-token stops surface quickly.
-      </p>
-      <div class="session-list">
-        {_session_rows(session_rankings, show_actions=not live_mode)}
-      </div>
     </section>
   </main>
 </body>

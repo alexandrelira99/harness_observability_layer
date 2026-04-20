@@ -10,6 +10,7 @@ from .project_aggregate import (
     group_events_into_prompt_turns,
 )
 from .project_dashboard import build_project_dashboard_html
+from .session_dashboard import build_session_dashboard_html
 from .session_artifacts import (
     ensure_project_artifact_dirs,
     import_claude_code_session_to_dir,
@@ -24,6 +25,7 @@ __all__ = [
     "build_project_aggregate",
     "build_project_aggregate_from_sessions",
     "build_project_dashboard_html",
+    "build_session_dashboard_html",
     "build_session_markdown",
     "build_session_report_html",
     "build_session_text",

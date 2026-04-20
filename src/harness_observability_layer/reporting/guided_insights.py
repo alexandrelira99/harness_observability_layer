@@ -5,117 +5,303 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 
-def _card(title: str, interpretation: str, evidence: str) -> Dict[str, str]:
+_SEVERITY_ORDER = {"high": 0, "medium": 1, "info": 2, "low": 3}
+
+
+def _card(
+    title: str,
+    interpretation: str,
+    evidence: str,
+    *,
+    severity: str = "medium",
+    recommendation: str = "",
+    topic: str = "",
+) -> Dict[str, str]:
     return {
         "title": title,
         "interpretation": interpretation,
         "evidence": f"Evidence: {evidence}",
+        "severity": severity,
+        "recommendation": recommendation,
+        "topic": topic or title,
     }
 
 
-def build_overview_insights(summary: Dict[str, Any]) -> List[Dict[str, str]]:
-    cards: List[Dict[str, str]] = []
+def build_session_insights(summary: Dict[str, Any]) -> List[Dict[str, str]]:
+    cards: Dict[str, Dict[str, str]] = {}
+
     edited_without_read = int(summary.get("edited_without_prior_read_count", 0) or 0)
     distinct_files_edited = int(summary.get("distinct_files_edited", 0) or 0)
     failure_rate = float(summary.get("failure_rate_pct", 0) or 0)
     continuation_loops = int(summary.get("continuation_loops", 0) or 0)
+    max_tokens_stops = int(summary.get("max_tokens_stops", 0) or 0)
     cache_tokens = int(summary.get("total_cache_read_tokens", 0) or 0)
     input_tokens = int(summary.get("total_input_tokens", 0) or 0)
+    output_tokens = int(summary.get("total_output_tokens", 0) or 0)
     total_tokens = int(summary.get("total_tokens", 0) or 0)
-
-    if edited_without_read:
-        cards.append(
-            _card(
-                "Low Edit Discipline",
-                "The session edited files without consistently reading them first.",
-                f"{edited_without_read} of {max(distinct_files_edited, edited_without_read)} edited files had no prior read",
-            )
-        )
-    if failure_rate >= 10:
-        cards.append(
-            _card(
-                "High Execution Volatility",
-                "The session showed unstable tool execution and deserves review.",
-                f"failure rate {failure_rate:.1f}%",
-            )
-        )
-    if continuation_loops:
-        cards.append(
-            _card(
-                "Continuation-Heavy Run",
-                "The session hit repeated continuation patterns that may indicate drift or excessive context pressure.",
-                f"{continuation_loops} continuation loops detected",
-            )
-        )
-    if cache_tokens > input_tokens and cache_tokens > 0:
-        cards.append(
-            _card(
-                "Cache-Dominant Token Profile",
-                "Most token volume came from cached context reuse rather than fresh input.",
-                f"{cache_tokens:,} cache tokens vs {input_tokens:,} fresh input tokens",
-            )
-        )
-    if total_tokens >= 1_000_000:
-        cards.append(
-            _card(
-                "Long-Running Session",
-                "The session accumulated substantial context and activity over time.",
-                f"{total_tokens:,} cumulative tokens",
-            )
-        )
-    attribution_shares = summary.get("attribution_shares", {}) or {}
-    skill_token_pct = float(attribution_shares.get("skill_attributed_token_pct", 0) or 0)
+    cost = summary.get("estimated_cost_usd")
+    reread_count = int(summary.get("reread_file_count", 0) or 0)
+    duration_seconds = float(summary.get("session_duration_seconds", 0) or 0)
+    tools_per_min = float(
+        (summary.get("efficiency_indicators") or {}).get("tool_calls_per_minute", 0)
+        or 0
+    )
+    tool_failure_rates = summary.get("tool_failure_rate_by_name") or {}
+    attribution_shares = summary.get("attribution_shares") or {}
+    skill_token_pct = float(
+        attribution_shares.get("skill_attributed_token_pct", 0) or 0
+    )
     distinct_skills = int(summary.get("distinct_skills_loaded", 0) or 0)
     unattributed_tokens = int(
         (summary.get("unattributed_activity") or {}).get("total_tokens", 0) or 0
     )
-    skill_attribution = summary.get("skill_attribution", {}) or {}
-    if skill_token_pct >= 70:
-        cards.append(
-            _card(
-                "Skill-Driven Session",
-                "Most of the session's token volume was attributable to loaded skills.",
-                f"{skill_token_pct:.1f}% of tokens attributed to skills",
+    skill_attribution = summary.get("skill_attribution") or {}
+
+    if edited_without_read:
+        severity = (
+            "high" if edited_without_read > distinct_files_edited / 2 else "medium"
+        )
+        cards["edit_without_read"] = _card(
+            "Edit-Without-Read Risk",
+            f"{edited_without_read} of {max(distinct_files_edited, edited_without_read)} edited files had no prior read. "
+            "The agent modified files it never inspected, which increases the chance of incorrect assumptions about existing code.",
+            f"{edited_without_read} of {max(distinct_files_edited, edited_without_read)} edited files had no prior read",
+            severity=severity,
+            recommendation="Review the edited files listed below and verify the changes align with the existing codebase structure.",
+            topic="edit_without_read",
+        )
+
+    if failure_rate >= 10:
+        cards["tool_failure"] = _card(
+            "High Execution Volatility",
+            f"Tool failure rate is {failure_rate:.1f}%, which means the session spent a significant share of effort on retries and error recovery instead of forward progress.",
+            f"failure rate {failure_rate:.1f}%",
+            severity="high",
+            recommendation="Investigate the most fragile tool in the Tool Calling Breakdown below. Reducing retries will lower both cost and time.",
+            topic="tool_failure",
+        )
+    elif failure_rate > 0:
+        cards["tool_failure"] = _card(
+            "Tool Failure Pressure",
+            f"Tool failure rate is {failure_rate:.1f}%. Some tool calls failed, introducing avoidable friction.",
+            f"overall failure rate {failure_rate:.1f}%",
+            severity="medium",
+            recommendation="Check the Tool Calling Breakdown for per-tool failure rates and focus on the highest-rate tool.",
+            topic="tool_failure",
+        )
+
+    if tool_failure_rates:
+        tool_name, tool_rate = sorted(
+            tool_failure_rates.items(), key=lambda item: (-item[1], item[0])
+        )[0]
+        if float(tool_rate) > 0 and "tool_failure" not in cards:
+            cards["fragile_tool"] = _card(
+                "Most Fragile Tool",
+                f"{tool_name} has the highest observed failure rate at {float(tool_rate):.1f}%.",
+                f"{tool_name} failure rate {float(tool_rate):.1f}%",
+                severity="medium",
+                recommendation=f"Review the arguments and permissions for {tool_name} to reduce retry-driven cost.",
+                topic="fragile_tool",
             )
+
+    if continuation_loops or max_tokens_stops:
+        severity = "high" if continuation_loops >= 2 else "medium"
+        cards["context_pressure"] = _card(
+            "Context Pressure",
+            f"The session hit {continuation_loops} continuation loops and {max_tokens_stops} max-token stops. "
+            "This indicates the context window was stretched, which degrades response quality and increases cost.",
+            f"{continuation_loops} continuation loops, {max_tokens_stops} max-token stops",
+            severity=severity,
+            recommendation="Use /clear before task shifts. Split long exploratory sessions into focused shorter ones.",
+            topic="context_pressure",
+        )
+
+    if cache_tokens > input_tokens and cache_tokens > 0:
+        cards["cache_dominance"] = _card(
+            "Cache-Dominant Token Profile",
+            f"Cache-read tokens ({cache_tokens:,}) exceed fresh input tokens ({input_tokens:,}). "
+            "Most token volume is context replay rather than new information.",
+            f"{cache_tokens:,} cache tokens vs {input_tokens:,} fresh input tokens",
+            severity="medium",
+            recommendation="Consider resetting context when the task changes to reduce stale context replay cost.",
+            topic="cache_dominance",
+        )
+
+    if total_tokens >= 1_000_000:
+        cards["long_session"] = _card(
+            "Long-Running Session",
+            f"This session accumulated {total_tokens:,} tokens, which is a substantial context footprint.",
+            f"{total_tokens:,} cumulative tokens",
+            severity="info",
+            recommendation="Large sessions benefit from periodic context resets to maintain response quality.",
+            topic="long_session",
+        )
+
+    if reread_count:
+        cards["rework"] = _card(
+            "Rework Signals",
+            f"{reread_count} files were re-read, which may indicate uncertainty or iterative debugging.",
+            f"{reread_count} files were re-read",
+            severity="info",
+            recommendation="If re-reads cluster around specific files, those files may need better initial documentation or more focused queries.",
+            topic="rework",
+        )
+
+    if duration_seconds > 0 and tools_per_min > 0:
+        edits_per_min = float(
+            (summary.get("efficiency_indicators") or {}).get("edits_per_minute", 0) or 0
+        )
+        cards["throughput"] = _card(
+            "Throughput Snapshot",
+            f"The session ran for {duration_seconds:.0f}s with {tools_per_min:.1f} tool calls/min and {edits_per_min:.1f} edits/min.",
+            f"{tools_per_min:.1f} tools/min, {edits_per_min:.1f} edits/min over {duration_seconds:.0f}s",
+            severity="info",
+            recommendation="Compare against project average to identify sessions that are disproportionately slow or fast.",
+            topic="throughput",
+        )
+
+    if skill_token_pct >= 70:
+        cards["skill_attribution"] = _card(
+            "Skill-Driven Session",
+            f"{skill_token_pct:.1f}% of token volume was attributable to loaded skills. The session was primarily skill-guided.",
+            f"{skill_token_pct:.1f}% of tokens attributed to skills",
+            severity="info",
+            recommendation="High skill attribution is usually efficient. Verify the skills used are still the best fit for the task.",
+            topic="skill_attribution",
         )
     elif distinct_skills and unattributed_tokens > 0:
-        cards.append(
-            _card(
-                "Mixed Guidance Footprint",
-                "The session combined skill-led work with a meaningful amount of unattributed agent activity.",
-                f"{unattributed_tokens:,} unattributed tokens alongside {distinct_skills} loaded skills",
-            )
+        cards["skill_attribution"] = _card(
+            "Mixed Guidance Footprint",
+            f"The session combined skill-led work with {unattributed_tokens:,} unattributed tokens. Some activity occurred outside any skill window.",
+            f"{unattributed_tokens:,} unattributed tokens alongside {distinct_skills} loaded skills",
+            severity="info",
+            recommendation="Unattributed activity is not necessarily bad, but it may indicate skill coverage gaps.",
+            topic="skill_attribution",
         )
+
     if skill_attribution:
         top_skill, top_stats = sorted(
             skill_attribution.items(),
-            key=lambda item: (
-                -(item[1].get("total_tokens", 0) or 0),
-                item[0],
-            ),
+            key=lambda item: (-(item[1].get("total_tokens", 0) or 0), item[0]),
         )[0]
         top_tokens = int(top_stats.get("total_tokens", 0) or 0)
         total_skill_tokens = sum(
             int(bucket.get("total_tokens", 0) or 0)
             for bucket in skill_attribution.values()
         )
-        if top_tokens and total_skill_tokens and (top_tokens / total_skill_tokens) >= 0.7:
-            cards.append(
-                _card(
-                    "Single Skill Dominance",
-                    "One skill accounted for most of the attributed session activity.",
-                    f"{top_skill} contributed {top_tokens:,} of {total_skill_tokens:,} attributed tokens",
-                )
+        if (
+            top_tokens
+            and total_skill_tokens
+            and (top_tokens / total_skill_tokens) >= 0.7
+        ):
+            cards["skill_dominance"] = _card(
+                "Single Skill Dominance",
+                f"{top_skill} accounted for {top_tokens:,} of {total_skill_tokens:,} attributed tokens.",
+                f"{top_skill} contributed {top_tokens:,} of {total_skill_tokens:,} attributed tokens",
+                severity="info",
+                recommendation=f"Consider whether {top_skill} should be decomposed into smaller, more focused skills.",
+                topic="skill_dominance",
             )
         elif len(skill_attribution) > 1:
-            cards.append(
-                _card(
-                    "Multi-Skill Session",
-                    "Session activity was distributed across more than one skill window.",
-                    f"{len(skill_attribution)} skills carried attributed activity",
-                )
+            cards["skill_dominance"] = _card(
+                "Multi-Skill Session",
+                f"Activity was distributed across {len(skill_attribution)} skills.",
+                f"{len(skill_attribution)} skills carried attributed activity",
+                severity="info",
+                recommendation="Multi-skill sessions are healthy when tasks are well-scoped.",
+                topic="skill_dominance",
             )
-    return cards[:5]
+
+    ordered = sorted(
+        cards.values(),
+        key=lambda c: (
+            _SEVERITY_ORDER.get(c.get("severity", "medium"), 2),
+            c.get("topic", ""),
+        ),
+    )
+    return ordered[:10]
+
+
+def build_session_executive_summary(summary: Dict[str, Any]) -> str:
+    parts: List[str] = []
+    total_tokens = int(summary.get("total_tokens", 0) or 0)
+    cost = summary.get("estimated_cost_usd")
+    tool_calls = int(summary.get("total_tool_calls", 0) or 0)
+    duration = float(summary.get("session_duration_seconds", 0) or 0)
+    model = str(summary.get("model") or "unknown")
+    failure_rate = float(summary.get("failure_rate_pct", 0) or 0)
+    edited_without_read = int(summary.get("edited_without_prior_read_count", 0) or 0)
+    distinct_files_edited = int(summary.get("distinct_files_edited", 0) or 0)
+    continuation_loops = int(summary.get("continuation_loops", 0) or 0)
+
+    scope = f"This {model} session used {total_tokens:,} tokens across {tool_calls} tool calls"
+    if cost is not None:
+        scope += f" for an estimated ${float(cost):.2f}"
+    scope += "."
+    parts.append(scope)
+
+    concerns: List[str] = []
+    if failure_rate >= 10:
+        concerns.append(f"a {failure_rate:.0f}% tool failure rate")
+    if edited_without_read and distinct_files_edited:
+        concerns.append(f"{edited_without_read} files edited without prior read")
+    if continuation_loops:
+        concerns.append(f"{continuation_loops} context continuation loops")
+
+    if concerns:
+        parts.append("Primary concerns: " + ", ".join(concerns) + ".")
+    elif duration > 0 and tool_calls > 0:
+        parts.append("No significant issues detected.")
+
+    return " ".join(parts)
+
+
+def build_project_executive_summary(aggregate: Dict[str, Any]) -> str:
+    totals = aggregate.get("totals") or {}
+    sessions = int(totals.get("sessions", 0) or 0)
+    if sessions == 0:
+        return "No sessions imported yet."
+
+    total_cost = float(totals.get("estimated_cost_usd", 0) or 0)
+    total_tokens = int(totals.get("total_tokens", 0) or 0)
+    session_rankings = aggregate.get("session_rankings") or []
+
+    parts: List[str] = []
+    parts.append(
+        f"This project has {sessions} session(s) totaling ${total_cost:.2f} "
+        f"and {total_tokens:,} tokens."
+    )
+
+    high_attention = [
+        s for s in session_rankings if float(s.get("attention_score", 0) or 0) > 0.5
+    ]
+    if high_attention:
+        top = high_attention[0]
+        title = top.get("display_title") or top.get("session_name", "a session")
+        parts.append(
+            f'The top session requiring attention is "{title}" '
+            f"(cost ${float(top.get('estimated_cost_usd', 0) or 0):.2f}, "
+            f"{float(top.get('failure_rate_pct', 0) or 0):.0f}% failure rate)."
+        )
+
+    return " ".join(parts)
+
+
+def build_overview_insights(summary: Dict[str, Any]) -> List[Dict[str, str]]:
+    return [
+        c
+        for c in build_session_insights(summary)
+        if c.get("topic")
+        in {
+            "edit_without_read",
+            "tool_failure",
+            "context_pressure",
+            "cache_dominance",
+            "long_session",
+            "skill_attribution",
+            "skill_dominance",
+        }
+    ][:5]
 
 
 def _project_card(
@@ -265,9 +451,10 @@ def build_project_cost_insights(aggregate: Dict[str, Any]) -> List[Dict[str, str
     if len(model_breakdown) >= 2:
         priciest = model_breakdown[0]
         cheapest = model_breakdown[-1]
-        if (
-            float(priciest.get("cost", 0) or 0) > float(cheapest.get("cost", 0) or 0)
-            and int(priciest.get("tool_calls", 0) or 0) <= int(cheapest.get("tool_calls", 0) or 0)
+        if float(priciest.get("cost", 0) or 0) > float(
+            cheapest.get("cost", 0) or 0
+        ) and int(priciest.get("tool_calls", 0) or 0) <= int(
+            cheapest.get("tool_calls", 0) or 0
         ):
             cards.append(
                 _project_card(
@@ -330,59 +517,32 @@ def build_project_prompt_insights(aggregate: Dict[str, Any]) -> List[Dict[str, s
 
 
 def build_qa_insights(summary: Dict[str, Any]) -> List[Dict[str, str]]:
-    cards: List[Dict[str, str]] = []
-    edited_without_read = int(summary.get("edited_without_prior_read_count", 0) or 0)
-    reread_count = int(summary.get("reread_file_count", 0) or 0)
-    failure_rate = float(summary.get("failure_rate_pct", 0) or 0)
-    continuation_loops = int(summary.get("continuation_loops", 0) or 0)
-    max_tokens_stops = int(summary.get("max_tokens_stops", 0) or 0)
-    tool_failure_rates = summary.get("tool_failure_rate_by_name", {}) or {}
+    return [
+        c
+        for c in build_session_insights(summary)
+        if c.get("topic")
+        in {
+            "edit_without_read",
+            "tool_failure",
+            "context_pressure",
+            "rework",
+            "fragile_tool",
+        }
+    ][:5]
 
-    if edited_without_read:
-        cards.append(
-            _card(
-                "Edit-Without-Read Risk",
-                "Several files were modified without an observed prior read event.",
-                f"{edited_without_read} files edited without prior read",
-            )
-        )
-    if reread_count:
-        cards.append(
-            _card(
-                "Rework Signals",
-                "The session revisited files repeatedly, which may indicate uncertainty or iterative debugging.",
-                f"{reread_count} files were re-read",
-            )
-        )
-    if failure_rate > 0:
-        cards.append(
-            _card(
-                "Tool Failure Pressure",
-                "Tool failures introduced avoidable execution friction.",
-                f"overall failure rate {failure_rate:.1f}%",
-            )
-        )
-    if continuation_loops or max_tokens_stops:
-        cards.append(
-            _card(
-                "Context Pressure",
-                "The session encountered continuation behavior associated with long-running context.",
-                f"{continuation_loops} continuation loops, {max_tokens_stops} max-token stops",
-            )
-        )
-    if tool_failure_rates:
-        tool_name, tool_rate = sorted(
-            tool_failure_rates.items(), key=lambda item: (-item[1], item[0])
-        )[0]
-        if float(tool_rate) > 0:
-            cards.append(
-                _card(
-                    "Most Fragile Tool",
-                    "One tool accounted for the highest observed failure pressure in the session.",
-                    f"{tool_name} failure rate {float(tool_rate):.1f}%",
-                )
-            )
-    return cards[:5]
+
+def build_cost_efficiency_insights(summary: Dict[str, Any]) -> List[Dict[str, str]]:
+    return [
+        c
+        for c in build_session_insights(summary)
+        if c.get("topic")
+        in {
+            "cache_dominance",
+            "throughput",
+            "skill_attribution",
+            "long_session",
+        }
+    ][:5]
 
 
 def build_cost_efficiency_insights(summary: Dict[str, Any]) -> List[Dict[str, str]]:
@@ -393,7 +553,8 @@ def build_cost_efficiency_insights(summary: Dict[str, Any]) -> List[Dict[str, st
     cost = summary.get("estimated_cost_usd")
     duration_seconds = float(summary.get("session_duration_seconds", 0) or 0)
     tools_per_min = float(
-        (summary.get("efficiency_indicators") or {}).get("tool_calls_per_minute", 0) or 0
+        (summary.get("efficiency_indicators") or {}).get("tool_calls_per_minute", 0)
+        or 0
     )
     edits_per_min = float(
         (summary.get("efficiency_indicators") or {}).get("edits_per_minute", 0) or 0
@@ -432,7 +593,9 @@ def build_cost_efficiency_insights(summary: Dict[str, Any]) -> List[Dict[str, st
             )
         )
     attribution_shares = summary.get("attribution_shares", {}) or {}
-    skill_token_pct = float(attribution_shares.get("skill_attributed_token_pct", 0) or 0)
+    skill_token_pct = float(
+        attribution_shares.get("skill_attributed_token_pct", 0) or 0
+    )
     unattributed_tokens = int(
         (summary.get("unattributed_activity") or {}).get("total_tokens", 0) or 0
     )
