@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.1 - 2026-04-20
+
+- made archived-session import path resolution safer and more portable across machines
+- added environment-variable and auto-discovery fallbacks for `hol import all` and `hol import latest`
+- changed missing archive resolution to fail with a clear configuration error instead of silently importing nothing
+
 ## 1.0.0 - 2026-04-19
 
 - expanded and refined session metrics, including richer attribution and guided reporting signals
