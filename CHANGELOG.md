@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.1.0 - 2026-04-20
+## 1.1.1 - 2026-04-20
 
 - simplified the public CLI around `hol init` and `hol data`
 - introduced a localhost-first dashboard flow with `/api/data` and `/api/refresh`
